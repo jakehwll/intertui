@@ -35,6 +35,7 @@ func startClient(cfg config.Config) tea.Cmd {
 		})
 
 		err := c.Start(context.Background())
+		c.SetStatus(nil)
 		doneCh <- clientReadyMsg{
 			client: c,
 			user:   c.User(),

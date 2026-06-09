@@ -461,7 +461,7 @@ func (c *Client) handleFrame(raw []byte) {
 		if line, ok := env.DisplayLine(); ok {
 			c.emit(GameLineMsg{Line: line})
 		} else if env.Event != "" {
-			c.status(env.Summarize())
+			c.emit(GameLineMsg{Line: env.Summarize()})
 		}
 	}
 }
