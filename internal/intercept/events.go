@@ -83,6 +83,17 @@ func (e Envelope) DisplayLine() (string, bool) {
 	return "", false
 }
 
+// IsSilent reports protocol events with no user-visible output.
+// These are consumed internally (login handshake, session metadata, config).
+func (e Envelope) IsSilent() bool {
+	switch e.Event {
+	case "info", "auth", "systems", "cfg":
+		return true
+	default:
+		return false
+	}
+}
+
 // Summarize returns a short debug line for unexpected server events.
 func (e Envelope) Summarize() string {
 	parts := []string{e.Event}

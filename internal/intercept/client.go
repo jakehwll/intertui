@@ -460,7 +460,7 @@ func (c *Client) handleFrame(raw []byte) {
 	if !c.waiter.Deliver(env) {
 		if line, ok := env.DisplayLine(); ok {
 			c.emit(GameLineMsg{Line: line})
-		} else if env.Event != "" {
+		} else if env.Event != "" && !env.IsSilent() {
 			c.emit(GameLineMsg{Line: env.Summarize()})
 		}
 	}

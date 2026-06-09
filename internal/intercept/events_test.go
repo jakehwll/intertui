@@ -49,6 +49,24 @@ func TestPlayerName(t *testing.T) {
 	}
 }
 
+func TestIsSilent(t *testing.T) {
+	t.Parallel()
+
+	silent := []string{"info", "auth", "systems", "cfg"}
+	for _, event := range silent {
+		if !(Envelope{Event: event}).IsSilent() {
+			t.Fatalf("event %q should be silent", event)
+		}
+	}
+
+	loud := []string{"chat", "command", "clink", "broadcast"}
+	for _, event := range loud {
+		if (Envelope{Event: event}).IsSilent() {
+			t.Fatalf("event %q should not be silent", event)
+		}
+	}
+}
+
 func TestConnectOK(t *testing.T) {
 	t.Parallel()
 

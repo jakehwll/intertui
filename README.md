@@ -91,6 +91,7 @@ intertui --server HOST --user YOU --pass SECRET
 | `PgUp` / `PgDn` | Page scroll |
 | `Ctrl+U` / `Ctrl+D` | Half-page scroll |
 | `Ctrl+P` / `Ctrl+N` | Command history |
+| `r` | Reconnect (after disconnect or failed login) |
 | `Ctrl+C` / `Esc` | Quit |
 | Mouse wheel | Scroll log |
 

@@ -292,6 +292,104 @@ func TestModelUpdateHistory(t *testing.T) {
 	}
 }
 
+func disconnectedModel(t *testing.T) Model {
+	t.Helper()
+
+	m := connectedModel(t)
+	updated, _ := m.Update(intercept.GameLineMsg{Line: "game output"})
+	m = updated.(Model)
+	updated, _ = m.Update(intercept.DisconnectedMsg{})
+	return updated.(Model)
+}
+
+func TestModelUpdateReconnect(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		setup     func(t *testing.T) Model
+		actions   func(t *testing.T, m *Model)
+		wantState connState
+		wantInLog []string
+	}{
+		{
+			name:  "r starts reconnect from error state",
+			setup: disconnectedModel,
+			actions: func(t *testing.T, m *Model) {
+				pressKey(t, m, tea.KeyPressMsg{Code: 'r'})
+			},
+			wantState: stateConnecting,
+			wantInLog: []string{"game output", "Disconnected.", "Reconnecting"},
+		},
+		{
+			name:  "r is ignored while connected",
+			setup: connectedModel,
+			actions: func(t *testing.T, m *Model) {
+				pressKey(t, m, tea.KeyPressMsg{Code: 'r'})
+			},
+			wantState: stateConnected,
+		},
+		{
+			name:  "reconnect success preserves log",
+			setup: disconnectedModel,
+			actions: func(t *testing.T, m *Model) {
+				pressKey(t, m, tea.KeyPressMsg{Code: 'r'})
+				updated, _ := m.Update(clientReadyMsg{user: "alice"})
+				*m = updated.(Model)
+			},
+			wantState: stateConnected,
+			wantInLog: []string{"game output", "Disconnected.", "Reconnecting", "Reconnected."},
+		},
+		{
+			name:  "reconnect failure returns to error state",
+			setup: disconnectedModel,
+			actions: func(t *testing.T, m *Model) {
+				pressKey(t, m, tea.KeyPressMsg{Code: 'r'})
+				updated, _ := m.Update(clientReadyMsg{err: errTest("dial refused")})
+				*m = updated.(Model)
+			},
+			wantState: stateError,
+			wantInLog: []string{"game output", "Reconnecting", "Connection failed: dial refused"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := tt.setup(t)
+			tt.actions(t, &m)
+
+			if m.state != tt.wantState {
+				t.Fatalf("state = %v, want %v", m.state, tt.wantState)
+			}
+			for _, want := range tt.wantInLog {
+				if !hasMessage(m.messages, want) {
+					t.Fatalf("messages missing %q: %#v", want, m.messages)
+				}
+			}
+		})
+	}
+}
+
+func TestModelUpdateReconnectStartsClient(t *testing.T) {
+	t.Parallel()
+
+	m := disconnectedModel(t)
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'r'})
+	model := updated.(Model)
+
+	if model.state != stateConnecting {
+		t.Fatalf("state = %v, want connecting", model.state)
+	}
+	if !model.reconnecting {
+		t.Fatal("expected reconnecting=true")
+	}
+	if cmd == nil {
+		t.Fatal("expected reconnect cmd")
+	}
+}
+
 func submit(t *testing.T, m *Model, value string) {
 	t.Helper()
 

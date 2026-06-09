@@ -30,8 +30,11 @@ func (m Model) View() tea.View {
 			Render(m.input.View())
 	} else {
 		hint := "…"
-		if m.state == stateError {
-			hint = "restart to reconnect"
+		switch m.state {
+		case stateError:
+			hint = "press r to reconnect"
+		case stateConnecting:
+			hint = "connecting…"
 		}
 		inputPanel = lipgloss.NewStyle().
 			Width(innerW).

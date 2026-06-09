@@ -101,6 +101,50 @@ func TestClientTCPLogin(t *testing.T) {
 	}
 }
 
+func TestClientInfoEventIsSilent(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		sc := bufio.NewScanner(conn)
+		for sc.Scan() {
+			var req map[string]any
+			if json.Unmarshal(sc.Bytes(), &req) != nil {
+				continue
+			}
+			request, _ := req["request"].(string)
+			switch request {
+			case "auth":
+				_, _ = conn.Write([]byte(`{"event":"auth","success":true,"token":"tok","player":"alice"}` + "\n"))
+			case "connect":
+				_, _ = conn.Write([]byte(`{"event":"connect","success":true}` + "\n"))
+				_, _ = conn.Write([]byte(`{"event":"info","client_id":"abc","client_type":"tcp","connected_at":1,"date":1}` + "\n"))
+			}
+		}
+	}()
+
+	c := NewTCP(ln.Addr().String(), Credentials{User: "alice", Pass: "secret"})
+	if err := c.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer c.Close()
+
+	select {
+	case msg := <-c.Messages():
+		t.Fatalf("unexpected message: %#v", msg)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
 func TestClientUnknownEventRoutesToLog(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

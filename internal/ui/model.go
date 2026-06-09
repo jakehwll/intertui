@@ -34,6 +34,7 @@ type Model struct {
 
 	state          connState
 	connectedUser  string
+	reconnecting   bool
 
 	width        int
 	height       int
@@ -102,6 +103,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case clientReadyMsg:
 		if msg.err != nil {
+			m.reconnecting = false
 			m.state = stateError
 			m.messages = append(m.messages, clientLine("Connection failed: "+msg.err.Error()))
 			m.updateViewport()
@@ -110,7 +112,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.client = msg.client
 		m.connectedUser = msg.user
 		m.state = stateConnected
-		m.messages = nil
+		if m.reconnecting {
+			m.reconnecting = false
+			m.appendStatus("Reconnected.")
+		} else {
+			m.messages = nil
+		}
 		m.input.Focus()
 		m.updateViewport()
 		m.viewport.GotoBottom()
@@ -159,6 +166,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if value := strings.TrimSpace(m.input.Value()); value != "" {
 					m.submitMessage(value)
 				}
+			}
+
+		case "r":
+			if m.state == stateError {
+				cmds = append(cmds, m.beginReconnect()...)
+				return m, tea.Batch(cmds...)
 			}
 		}
 	}
