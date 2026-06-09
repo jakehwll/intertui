@@ -1,0 +1,18 @@
+# binaries
+/intertui
+*.exe
+
+# probe build artifacts
+/cmd/probe/probe
+
+# test / debug
+*.test
+coverage.out
+
+# OS
+.DS_Store
+
+# editor
+.idea/
+.vscode/
+*.swp
