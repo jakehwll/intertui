@@ -10,7 +10,8 @@ Thanks for your interest in contributing. This is a small Go project; keeping ch
 
    ```bash
    go build -o intertui .
-   ./intertui --offline
+   ./intertui init --server HOST --user YOU --pass SECRET   # or --offline
+   ./intertui
    ```
 
 4. Run the test suite:

@@ -9,6 +9,7 @@ require (
 	github.com/coder/serpent v0.15.0
 	github.com/coder/websocket v1.8.14
 	github.com/spf13/pflag v1.0.5
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -46,5 +47,4 @@ require (
 	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/term v0.17.0 // indirect
 	golang.org/x/xerrors v0.0.0-20231012003039-104605ab7028 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

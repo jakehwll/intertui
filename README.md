@@ -36,8 +36,14 @@ go build -o intertui .
 ## Usage
 
 ```bash
-# TCP to the game server
-./intertui --server HOST --user YOU --pass SECRET
+# One-time setup (writes ~/.intertui/config.yaml)
+intertui init --server HOST --user YOU --pass SECRET
+
+# Connect using config file
+intertui
+
+# Or pass flags (override config)
+intertui --server HOST --user YOU --pass SECRET
 
 # Offline mock server (no network)
 ./intertui --offline
@@ -90,7 +96,7 @@ go build -o intertui .
 
 ## Configuration
 
-Default port lives in [`internal/constants/constants.go`](internal/constants/constants.go) (`DEFAULT_PORT`). Set `--server` or `INTERCEPT_SERVER` for the host. WebSocket URLs are derived as `ws://host:port/ws` unless you pass `--url`.
+Default settings live in `~/.intertui/config.yaml` (create with `intertui init`). Flags and environment variables override the file. Default port is in [`internal/constants/constants.go`](internal/constants/constants.go) (`DEFAULT_PORT`). WebSocket URLs are derived as `ws://host:port/ws` unless you pass `--url`.
 
 ## Development
 

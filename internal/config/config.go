@@ -26,90 +26,116 @@ type Config struct {
 	URL    string
 }
 
-// Parse reads flags and environment variables.
-func Parse() (Config, error) {
+// RootCmd returns the CLI root with the default TUI command and subcommands.
+func RootCmd(run func(Config) error) *serpent.Command {
 	var cfg Config
 	var port int64
+	var configPath serpent.YAMLConfigPath
 
-	cmd := &serpent.Command{
-		Use:   "intertui",
-		Short: "Terminal client for Intercept.",
-		Options: serpent.OptionSet{
-			{
-				Name:        "user",
-				Flag:        "user",
-				Env:         "INTERCEPT_USER",
-				Value:       serpent.StringOf(&cfg.User),
-				Description: "Intercept username.",
-			},
-			{
-				Name:        "pass",
-				Flag:        "pass",
-				Env:         "INTERCEPT_PASS",
-				Value:       serpent.StringOf(&cfg.Pass),
-				Description: "Intercept password.",
-			},
-			{
-				Name:        "token",
-				Flag:        "token",
-				Env:         "INTERCEPT_TOKEN",
-				Value:       serpent.StringOf(&cfg.Token),
-				Description: "Intercept API token (WebSocket mode only).",
-			},
-			{
-				Name:        "server",
-				Flag:        "server",
-				Env:         "INTERCEPT_SERVER",
-				Value:       serpent.StringOf(&cfg.Server),
-				Description: "Game server host or IP.",
-			},
-			{
-				Name:        "port",
-				Flag:        "port",
-				Env:         "INTERCEPT_PORT",
-				Default:     "0",
-				Value:       serpent.Int64Of(&port),
-				Description: fmt.Sprintf("Server port (default %d).", constants.DEFAULT_PORT),
-			},
-			{
-				Name:        "ws",
-				Flag:        "ws",
-				Env:         "INTERCEPT_WS",
-				Value:       serpent.BoolOf(&cfg.WS),
-				Description: fmt.Sprintf("Use WebSocket transport (default: raw TCP on port %d).", constants.DEFAULT_PORT),
-			},
-			{
-				Name:        "tls",
-				Flag:        "tls",
-				Env:         "INTERCEPT_TLS",
-				Value:       serpent.BoolOf(&cfg.TLS),
-				Description: "Use wss:// instead of ws:// (with --ws).",
-			},
-			{
-				Name:        "url",
-				Flag:        "url",
-				Env:         "INTERCEPT_URL",
-				Value:       serpent.StringOf(&cfg.URL),
-				Description: "Full endpoint URL (overrides --server; ws:// or wss:// enables WebSocket).",
-			},
-			{
-				Name:        "offline",
-				Flag:        "offline",
-				Value:       serpent.BoolOf(&cfg.Offline),
-				Description: "Use built-in mock server.",
-			},
+	opts := serpent.OptionSet{
+		{
+			Name:        "config",
+			Flag:        "config",
+			Env:         "INTERTUI_CONFIG",
+			Value:       &configPath,
+			Description: "Path to YAML config file (default: ~/.intertui/config.yaml).",
 		},
+		{
+			Name:        "user",
+			Flag:        "user",
+			Env:         "INTERCEPT_USER",
+			YAML:        "user",
+			Value:       serpent.StringOf(&cfg.User),
+			Description: "Intercept username.",
+		},
+		{
+			Name:        "pass",
+			Flag:        "pass",
+			Env:         "INTERCEPT_PASS",
+			YAML:        "pass",
+			Value:       serpent.StringOf(&cfg.Pass),
+			Description: "Intercept password.",
+		},
+		{
+			Name:        "token",
+			Flag:        "token",
+			Env:         "INTERCEPT_TOKEN",
+			YAML:        "token",
+			Value:       serpent.StringOf(&cfg.Token),
+			Description: "Intercept API token (WebSocket mode only).",
+		},
+		{
+			Name:        "server",
+			Flag:        "server",
+			Env:         "INTERCEPT_SERVER",
+			YAML:        "server",
+			Value:       serpent.StringOf(&cfg.Server),
+			Description: "Game server host or IP.",
+		},
+		{
+			Name:        "port",
+			Flag:        "port",
+			Env:         "INTERCEPT_PORT",
+			YAML:        "port",
+			Default:     "0",
+			Value:       serpent.Int64Of(&port),
+			Description: fmt.Sprintf("Server port (default %d).", constants.DEFAULT_PORT),
+		},
+		{
+			Name:        "ws",
+			Flag:        "ws",
+			Env:         "INTERCEPT_WS",
+			YAML:        "ws",
+			Value:       serpent.BoolOf(&cfg.WS),
+			Description: fmt.Sprintf("Use WebSocket transport (default: raw TCP on port %d).", constants.DEFAULT_PORT),
+		},
+		{
+			Name:        "tls",
+			Flag:        "tls",
+			Env:         "INTERCEPT_TLS",
+			YAML:        "tls",
+			Value:       serpent.BoolOf(&cfg.TLS),
+			Description: "Use wss:// instead of ws:// (with --ws).",
+		},
+		{
+			Name:        "url",
+			Flag:        "url",
+			Env:         "INTERCEPT_URL",
+			YAML:        "url",
+			Value:       serpent.StringOf(&cfg.URL),
+			Description: "Full endpoint URL (overrides --server; ws:// or wss:// enables WebSocket).",
+		},
+		{
+			Name:        "offline",
+			Flag:        "offline",
+			Value:       serpent.BoolOf(&cfg.Offline),
+			Description: "Use built-in mock server.",
+		},
+	}
+
+	root := &serpent.Command{
+		Use:     "intertui",
+		Short:   "Terminal client for Intercept.",
+		Options: opts,
 		Handler: func(inv *serpent.Invocation) error {
 			cfg.Port = int(port)
 			cfg.finalize()
-			return nil
+			return run(cfg)
 		},
 	}
 
-	if err := cmd.Invoke().WithOS().Run(); err != nil {
-		return Config{}, err
-	}
-	return cfg, nil
+	root.AddSubcommands(InitCmd())
+	return root
+}
+
+// Parse reads flags, environment variables, and ~/.intertui/config.yaml.
+func Parse() (Config, error) {
+	var cfg Config
+	err := RunCLI(func(c Config) error {
+		cfg = c
+		return nil
+	})
+	return cfg, err
 }
 
 func (c *Config) finalize() {

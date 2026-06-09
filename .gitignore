@@ -5,6 +5,9 @@
 # probe build artifacts
 /cmd/probe/probe
 
+# local config (use intertui init)
+.intertui/
+
 # test / debug
 *.test
 coverage.out
