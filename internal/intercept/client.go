@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	stdlog "log"
 	"net"
 	"os"
 	"strings"
@@ -15,6 +15,8 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+
+	filelog "intertui/internal/log"
 )
 
 var debugWire = os.Getenv("INTERCEPT_DEBUG") != ""
@@ -52,6 +54,7 @@ func (c *Client) SetStatus(fn func(string)) {
 }
 
 func (c *Client) status(line string) {
+	filelog.Status(line)
 	if c.onStatus != nil {
 		c.onStatus(line)
 	}
@@ -373,8 +376,9 @@ func (c *Client) sendNow(data map[string]any) error {
 	c.writeMu.Lock()
 	err = c.writeFrame(raw)
 	c.writeMu.Unlock()
+	filelog.WireWrite(raw, err)
 	if debugWire {
-		log.Printf("wire write: %s err=%v", raw, err)
+		stdlog.Printf("wire write: %s err=%v", raw, err)
 	}
 	return err
 }
@@ -444,25 +448,33 @@ func (c *Client) readLoopWS() {
 }
 
 func (c *Client) handleFrame(raw []byte) {
+	filelog.WireRead(raw)
 	if debugWire {
-		log.Printf("wire read: %s", raw)
+		stdlog.Printf("wire read: %s", raw)
 	}
 	env, err := ParseEnvelope(raw)
 	if err != nil {
+		filelog.Info("parse err: %v", err)
 		if debugWire {
-			log.Printf("wire parse err: %v", err)
+			stdlog.Printf("wire parse err: %v", err)
 		}
 		return
 	}
 	if debugWire {
-		log.Printf("wire event: %s success=%v", env.Event, env.Success)
+		stdlog.Printf("wire event: %s success=%v", env.Event, env.Success)
 	}
-	if !c.waiter.Deliver(env) {
-		if line, ok := env.DisplayLine(); ok {
-			c.emit(GameLineMsg{Line: line})
-		} else if env.Event != "" && !env.IsSilent() {
-			c.emit(GameLineMsg{Line: env.Summarize()})
-		}
+	if c.waiter.Deliver(env) {
+		filelog.Event(env.Event, "rpc")
+		return
+	}
+	if line, ok := env.DisplayLine(); ok {
+		filelog.Event(env.Event, "display")
+		c.emit(GameLineMsg{Line: line})
+	} else if env.Event != "" && !env.IsSilent() {
+		filelog.Event(env.Event, "summarize")
+		c.emit(GameLineMsg{Line: env.Summarize()})
+	} else if env.Event != "" {
+		filelog.Event(env.Event, "silent")
 	}
 }
 
@@ -480,6 +492,7 @@ func (c *Client) writeLoop() {
 			c.writeMu.Lock()
 			err = c.writeFrame(raw)
 			c.writeMu.Unlock()
+			filelog.WireWrite(raw, err)
 			if err != nil {
 				return
 			}

@@ -99,6 +99,8 @@ intertui --server HOST --user YOU --pass SECRET
 
 Default settings live in `~/.intertui/config.yaml` (create with `intertui init`). Flags and environment variables override the file. Default port is in [`internal/constants/constants.go`](internal/constants/constants.go) (`DEFAULT_PORT`). WebSocket URLs are derived as `ws://host:port/ws` unless you pass `--url`.
 
+Session logs are written to `~/.intertui/logs/latest.log`. On each launch, the previous `latest.log` is renamed to a timestamped file in the same directory (for example `2025-06-10T12-34-56.log`).
+
 ## Development
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).

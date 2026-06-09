@@ -9,6 +9,7 @@ import (
 
 	"intertui/internal/config"
 	"intertui/internal/intercept"
+	filelog "intertui/internal/log"
 )
 
 const inputRows = 1
@@ -105,10 +106,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.reconnecting = false
 			m.state = stateError
+			filelog.Info("connect failed err=%v", msg.err)
 			m.messages = append(m.messages, clientLine("Connection failed: "+msg.err.Error()))
 			m.updateViewport()
 			break
 		}
+		filelog.Info("connect ok user=%s", msg.user)
 		m.client = msg.client
 		m.connectedUser = msg.user
 		m.state = stateConnected
@@ -136,6 +139,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			line := "Disconnected."
 			if msg.Err != nil {
 				line = "Disconnected: " + msg.Err.Error()
+				filelog.Info("disconnect err=%v", msg.Err)
+			} else {
+				filelog.Info("disconnect")
 			}
 			m.messages = append(m.messages, clientLine(line))
 			m.updateViewport()

@@ -6,8 +6,8 @@ import (
 )
 
 const (
-	dirName     = ".intertui"
-	configName  = "config.yaml"
+	dirName    = ".intertui"
+	configName = "config.yaml"
 )
 
 // Dir returns the intertui config directory (~/.intertui).

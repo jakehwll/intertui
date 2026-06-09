@@ -10,6 +10,7 @@ import (
 
 	"intertui/internal/config"
 	"intertui/internal/intercept"
+	filelog "intertui/internal/log"
 	"intertui/internal/ui"
 )
 
@@ -24,6 +25,12 @@ func main() {
 }
 
 func run(cfg config.Config) error {
+	if err := filelog.Open(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: file logging disabled: %v\n", err)
+	} else {
+		defer filelog.Close()
+	}
+
 	if cfg.Offline {
 		srv, url := intercept.StartMockServer()
 		defer srv.Close()
@@ -37,6 +44,9 @@ func run(cfg config.Config) error {
 			return fmt.Errorf("server required: run `intertui init --server HOST`, or use --server / --url")
 		}
 	}
+
+	logPath, _ := filelog.Path()
+	filelog.Info("start target=%s offline=%v ws=%v user=%s log=%s", cfg.DialDescription(), cfg.Offline, cfg.WS, cfg.User, logPath)
 
 	p := tea.NewProgram(ui.New(cfg), tea.WithFPS(120))
 
