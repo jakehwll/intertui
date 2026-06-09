@@ -32,7 +32,8 @@ type Model struct {
 	viewport viewport.Model
 	input    textinput.Model
 
-	state connState
+	state          connState
+	connectedUser  string
 
 	width        int
 	height       int
@@ -107,6 +108,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		m.client = msg.client
+		m.connectedUser = msg.user
 		m.state = stateConnected
 		m.messages = nil
 		m.input.Focus()
