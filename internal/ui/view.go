@@ -9,12 +9,14 @@ import (
 
 // View implements tea.Model.
 func (m Model) View() tea.View {
-	v := tea.NewView("\n  loading...")
-	v.AltScreen = true
-
 	if !m.ready {
+		v := tea.NewView("")
+		v.AltScreen = true
 		return v
 	}
+
+	v := tea.NewView("")
+	v.AltScreen = true
 
 	border := lipgloss.NormalBorder()
 	innerW, _ := m.innerSize()

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
@@ -37,11 +38,12 @@ type Model struct {
 	connectedUser  string
 	reconnecting   bool
 
-	width        int
-	height       int
-	ready        bool
-	historyIndex int
-	historyDraft string
+	width         int
+	height        int
+	ready         bool
+	clientStarted bool
+	historyIndex  int
+	historyDraft  string
 }
 
 // New returns the initial UI model.
@@ -66,15 +68,14 @@ func New(cfg config.Config) Model {
 	return m
 }
 
+type deferredStartMsg struct{}
+
 // Init implements tea.Model.
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{textinput.Blink}
-
-	if m.state == stateConnecting {
-		cmds = append(cmds, startClient(m.cfg))
-	}
-
-	return tea.Batch(cmds...)
+	return tea.Batch(
+		textinput.Blink,
+		tea.Tick(200*time.Millisecond, func(time.Time) tea.Msg { return deferredStartMsg{} }),
+	)
 }
 
 // Update implements tea.Model.
@@ -97,6 +98,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.layout()
 		m.updateViewport()
+
+	case deferredStartMsg:
+		if cmd := m.maybeStartClient(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 
 	case connectProgressMsg:
 		m.appendStatus(msg.line)

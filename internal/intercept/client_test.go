@@ -6,11 +6,10 @@ import (
 	"time"
 )
 
-func TestClientOfflineLogin(t *testing.T) {
-	srv, url := StartMockServer()
-	defer srv.Close()
+func TestClientMockLogin(t *testing.T) {
+	t.Parallel()
 
-	c := NewWebSocket(url, Credentials{User: "test", Pass: "test"})
+	c := NewMock(Credentials{User: "test", Pass: "test"})
 	if err := c.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -33,5 +32,22 @@ func TestClientOfflineLogin(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for command response")
+	}
+}
+
+func TestClientOfflineLoginViaMockServer(t *testing.T) {
+	t.Parallel()
+
+	srv, url := StartMockServer()
+	defer srv.Close()
+
+	c := NewWebSocket(url, Credentials{User: "test", Pass: "test"})
+	if err := c.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer c.Close()
+
+	if c.User() != "test" {
+		t.Fatalf("user = %q", c.User())
 	}
 }

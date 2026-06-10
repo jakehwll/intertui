@@ -8,6 +8,7 @@ require (
 	charm.land/lipgloss/v2 v2.0.2
 	github.com/coder/serpent v0.15.0
 	github.com/coder/websocket v1.8.14
+	github.com/muesli/termenv v0.15.2
 	github.com/spf13/pflag v1.0.5
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -33,7 +34,6 @@ require (
 	github.com/mattn/go-runewidth v0.0.23 // indirect
 	github.com/mitchellh/go-wordwrap v1.0.1 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
-	github.com/muesli/termenv v0.15.2 // indirect
 	github.com/pion/transport/v2 v2.0.0 // indirect
 	github.com/pion/udp v0.1.4 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
@@ -48,3 +48,5 @@ require (
 	golang.org/x/term v0.17.0 // indirect
 	golang.org/x/xerrors v0.0.0-20231012003039-104605ab7028 // indirect
 )
+
+replace github.com/atotto/clipboard => github.com/tmc/clipboard v0.1.5-0.20250405003139-9647e2a4d49f

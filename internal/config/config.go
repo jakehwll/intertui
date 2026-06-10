@@ -183,6 +183,9 @@ func (c Config) DialDescription() string {
 
 // NewClient builds an intercept client from config.
 func (c Config) NewClient() *intercept.Client {
+	if c.Offline {
+		return intercept.NewMock(c.Credentials())
+	}
 	if c.WS {
 		return intercept.NewWebSocket(c.ResolveURL(), c.Credentials())
 	}

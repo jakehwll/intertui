@@ -36,6 +36,8 @@ type Client struct {
 
 	tcp    net.Conn
 	ws     *websocket.Conn
+	mockIn  chan []byte
+	mockOut chan []byte
 	ctx    context.Context
 	cancel context.CancelFunc
 
@@ -80,6 +82,17 @@ func NewWebSocket(url string, cred Credentials) *Client {
 	}
 }
 
+// NewMock creates a client backed by an in-process mock server.
+func NewMock(cred Credentials) *Client {
+	return &Client{
+		transport: TransportMock,
+		cred:      cred,
+		msgs:      make(chan ClientMsg, 64),
+		mockIn:    make(chan []byte, 32),
+		mockOut:   make(chan []byte, 64),
+	}
+}
+
 // Messages returns the outbound message channel for the UI.
 func (c *Client) Messages() <-chan ClientMsg {
 	return c.msgs
@@ -103,7 +116,10 @@ func (c *Client) Start(parent context.Context) error {
 		}
 		c.tcp = conn
 		c.status("TCP connected")
-	default:
+	case TransportMock:
+		c.status("Starting offline mock…")
+		go c.mockLoop()
+	case TransportWebSocket:
 		c.status("Opening WebSocket to " + c.addr + "…")
 		conn, _, err := websocket.Dial(c.ctx, c.addr, nil)
 		if err != nil {
@@ -418,8 +434,42 @@ func (c *Client) readLoop() {
 	switch c.transport {
 	case TransportTCP:
 		c.readLoopTCP()
+	case TransportMock:
+		c.readLoopMock()
 	default:
 		c.readLoopWS()
+	}
+}
+
+func (c *Client) readLoopMock() {
+	for {
+		select {
+		case raw := <-c.mockOut:
+			c.handleFrame(raw)
+		case <-c.ctx.Done():
+			return
+		}
+	}
+}
+
+func (c *Client) mockLoop() {
+	for {
+		select {
+		case raw := <-c.mockIn:
+			var req map[string]any
+			if err := json.Unmarshal(raw, &req); err != nil {
+				continue
+			}
+			for _, frame := range mockResponses(req) {
+				select {
+				case c.mockOut <- frame:
+				case <-c.ctx.Done():
+					return
+				}
+			}
+		case <-c.ctx.Done():
+			return
+		}
 	}
 }
 
@@ -513,6 +563,13 @@ func (c *Client) writeFrame(raw []byte) error {
 	case TransportTCP:
 		_, err := c.tcp.Write(append(raw, '\n'))
 		return err
+	case TransportMock:
+		select {
+		case c.mockIn <- raw:
+			return nil
+		case <-c.ctx.Done():
+			return c.ctx.Err()
+		}
 	default:
 		return wsjson.Write(c.ctx, c.ws, json.RawMessage(raw))
 	}

@@ -12,7 +12,8 @@ This project is unofficial and not affiliated with the game or its authors.
 - ANSI colors for in-game `¬` color codes
 - TCP transport (default) with optional WebSocket mode
 - Username/password login (TCP) or extended WebSocket login flows
-- Offline mode with a built-in mock server for development
+- Offline mode with a built-in in-process mock server
+- Browser build (WASM + xterm.js) for GitHub Pages
 
 ## Requirements
 
@@ -67,7 +68,7 @@ intertui --server HOST --user YOU --pass SECRET
 | `--ws` | Use WebSocket instead of TCP |
 | `--tls` | Use `wss://` instead of `ws://` (with `--ws`) |
 | `--url` | Full WebSocket URL (overrides `--server` / `--port`) |
-| `--offline` | Built-in mock WebSocket server |
+| `--offline` | Built-in in-process mock server |
 
 ### Environment variables
 
@@ -101,6 +102,36 @@ Default settings live in `~/.intertui/config.yaml` (create with `intertui init`)
 
 Session logs are written to `~/.intertui/logs/latest.log`. On each launch, the previous `latest.log` is renamed to a timestamped file in the same directory (for example `2025-06-10T12-34-56.log`).
 
+## Web (GitHub Pages)
+
+The browser build runs the same Bubble Tea TUI in WASM with [xterm.js](https://xtermjs.org/) as the terminal.
+
+```bash
+./scripts/build-wasm.sh
+go run ./web/serve.go
+# open http://localhost:8080
+```
+
+Pushes to `main` deploy `web/` to GitHub Pages via [`.github/workflows/pages.yml`](.github/workflows/pages.yml). Enable **Pages → Source: GitHub Actions** in the repo settings once.
+
+### URL parameters
+
+| Param | Description |
+|-------|-------------|
+| *(none)* | Offline mock (default) |
+| `offline=0` | Require live connection params |
+| `ws=1` | Use WebSocket transport |
+| `server` | Game server host |
+| `port` | Server port |
+| `user` / `pass` | Login credentials |
+| `token` | API token (WebSocket) |
+| `tls=1` | Use `wss://` |
+| `url` | Full WebSocket URL |
+
+Example live play: `?ws=1&server=example.com&user=YOU&pass=SECRET`
+
+TCP is not available in the browser. Live WebSocket may fail if the game server blocks cross-origin browser connections.
+
 ## Development
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -120,11 +151,17 @@ Inbound events include `chat`, `broadcast`, `command`, `connect`, and others. Co
 intertui/
   main.go
   internal/
+    app/           # shared TUI runner
     constants/     # DEFAULT_PORT
     config/        # flags and env
     intercept/     # protocol client
     ui/            # Bubble Tea TUI
-  cmd/probe/       # optional protocol debugger
+    wasmio/        # xterm.js bridge (WASM only)
+  cmd/
+    probe/         # optional protocol debugger
+    wasm/          # browser entrypoint
+  web/             # index.html + local dev server
+  scripts/         # build-wasm.sh
 ```
 
 ## License

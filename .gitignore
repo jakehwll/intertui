@@ -2,6 +2,11 @@
 /intertui
 *.exe
 
+# wasm build artifacts
+/web/intertui.wasm
+/web/wasm_exec.js
+/vendor/
+
 # probe build artifacts
 /cmd/probe/probe
 

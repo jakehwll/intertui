@@ -24,3 +24,6 @@ jobs:
 
       - name: Vet
         run: go vet ./...
+
+      - name: Build WASM
+        run: bash scripts/build-wasm.sh

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>intertui</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: #000;
+      color: #aaa;
+      font-family: system-ui, sans-serif;
+    }
+    #hint {
+      padding: 0.4rem 0.75rem;
+      font-size: 0.8rem;
+      border-bottom: 1px solid #222;
+    }
+    #terminal {
+      height: calc(100% - 2rem);
+      width: 100%;
+    }
+    #status {
+      padding: 0.25rem 0.75rem;
+      font-size: 0.75rem;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div id="hint">Offline demo. Add <code>?ws=1&amp;server=HOST&amp;user=YOU&amp;pass=SECRET</code> for live WebSocket play.</div>
+  <div id="terminal"></div>
+  <div id="status">Loading WASM…</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+  <script src="./wasm_exec.js"></script>
+  <script>
+    const status = document.getElementById("status");
+
+    async function init() {
+      const term = new Terminal({
+        cursorBlink: true,
+        convertEol: true,
+        fontSize: 14,
+        fontFamily: "Menlo, Monaco, 'Courier New', monospace",
+        theme: { background: "#000000", foreground: "#cccccc" },
+      });
+      const fitAddon = new FitAddon.FitAddon();
+      term.loadAddon(fitAddon);
+      term.open(document.getElementById("terminal"));
+      fitAddon.fit();
+      term.focus();
+
+      window.addEventListener("resize", () => fitAddon.fit());
+
+      // Let layout settle so cols/rows are correct before Go reads them.
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      fitAddon.fit();
+
+      globalThis.term = term;
+      term.clear();
+
+      const go = new Go();
+      const result = await WebAssembly.instantiateStreaming(
+        fetch("./intertui.wasm"),
+        go.importObject
+      );
+      status.textContent = "Running…";
+      go.run(result.instance);
+    }
+
+    init().catch((err) => {
+      status.textContent = "Failed to load: " + err;
+      console.error(err);
+    });
+  </script>
+</body>
+</html>
