@@ -485,6 +485,41 @@ func TestNewLinesDoNotScrollDuringSelection(t *testing.T) {
 	}
 }
 
+func TestMouseSelectionMultilineMessage(t *testing.T) {
+	t.Parallel()
+
+	m := connectedModel(t)
+	// A single game message spanning several rows (like `ls` output) must
+	// occupy one displayLines entry per rendered row.
+	updated, _ := m.Update(intercept.GameLineMsg{Line: "logs/\n    xfer.log"})
+	m = updated.(Model)
+	updated, _ = m.Update(intercept.GameLineMsg{Line: "done"})
+	m = updated.(Model)
+
+	if got := len(m.displayLines); got != 3 {
+		t.Fatalf("len(displayLines) = %d, want 3", got)
+	}
+
+	// Select the last row; before the fix this row was unreachable because
+	// the multi-line message counted as a single entry.
+	updated, _ = m.Update(tea.MouseClickMsg{X: 0, Y: 2, Button: tea.MouseLeft})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.MouseMotionMsg{X: 3, Y: 2, Button: tea.MouseLeft})
+	m = updated.(Model)
+	if got := m.selectionText(); got != "done" {
+		t.Fatalf("selectionText() = %q, want %q", got, "done")
+	}
+
+	// And the middle row maps to the second half of the multi-line message.
+	updated, _ = m.Update(tea.MouseClickMsg{X: 0, Y: 1, Button: tea.MouseLeft})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.MouseMotionMsg{X: 11, Y: 1, Button: tea.MouseLeft})
+	m = updated.(Model)
+	if got := m.selectionText(); got != "    xfer.log" {
+		t.Fatalf("selectionText() = %q, want %q", got, "    xfer.log")
+	}
+}
+
 func TestMouseSelectionMultiline(t *testing.T) {
 	t.Parallel()
 

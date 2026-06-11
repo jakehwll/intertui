@@ -289,11 +289,19 @@ func (m *Model) syncLog() {
 	m.viewport.SetContent(strings.Join(m.displayLines, "\n"))
 }
 
+// wrapLine splits a message into screen rows: embedded newlines first, then
+// hard-wrapping to the terminal width. Each returned entry is exactly one
+// rendered row, keeping mouse-selection indices aligned with the viewport.
 func wrapLine(line string, w int) []string {
-	if w <= 0 || ansi.StringWidth(line) <= w {
-		return []string{line}
+	var out []string
+	for _, part := range strings.Split(strings.ReplaceAll(line, "\r\n", "\n"), "\n") {
+		if w <= 0 || ansi.StringWidth(part) <= w {
+			out = append(out, part)
+			continue
+		}
+		out = append(out, strings.Split(ansi.Hardwrap(part, w, true), "\n")...)
 	}
-	return strings.Split(ansi.Hardwrap(line, w, true), "\n")
+	return out
 }
 
 // clampToLog converts screen coordinates to (cell column, displayLines index).
