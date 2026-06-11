@@ -93,8 +93,14 @@ func TestParseListing(t *testing.T) {
 	}
 }
 
+func setInput(t *testing.T, m *Model, value string) {
+	t.Helper()
+	m.input.SetValue(value)
+	m.input.CursorEnd()
+}
+
 func pathTargetFromLine(line string) (pathTarget, bool) {
-	t, ok := parseInputTarget(line)
+	t, ok := parseInputTarget(line, len(line))
 	if !ok {
 		return pathTarget{}, false
 	}
@@ -103,6 +109,61 @@ func pathTargetFromLine(line string) (pathTarget, bool) {
 		return pathTarget{}, false
 	}
 	return pathTargetFrom(t, arg.Path)
+}
+
+func TestParseInputTargetCursor(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		line   string
+		cursor int
+		want   inputTarget
+	}{
+		{
+			name:   "cursor at end matches last token",
+			line:   "software install 1",
+			cursor: len("software install 1"),
+			want: inputTarget{
+				cmd: "software", argPos: 2,
+				prefix: "software install ", token: "1", partial: "1",
+			},
+		},
+		{
+			name:   "cursor on earlier word",
+			line:   "software install 1",
+			cursor: len("software inst"),
+			want: inputTarget{
+				cmd: "software", argPos: 1,
+				prefix: "software ", token: "install", partial: "inst",
+				wordSuffix: "all", suffix: " 1",
+			},
+		},
+		{
+			name:   "cursor on command name",
+			line:   "software install",
+			cursor: len("soft"),
+			want: inputTarget{
+				cmd: "software", argPos: 0,
+				token: "software", partial: "soft", wordSuffix: "ware",
+				suffix: " install",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := parseInputTarget(tt.line, tt.cursor)
+			if !ok {
+				t.Fatal("parseInputTarget returned false")
+			}
+			if got != tt.want {
+				t.Fatalf("parseInputTarget(%q, %d) = %#v, want %#v", tt.line, tt.cursor, got, tt.want)
+			}
+		})
+	}
 }
 
 func TestParsePathTarget(t *testing.T) {
@@ -261,7 +322,7 @@ func TestRmRmdirCompletion(t *testing.T) {
 	m.completions[completionKey{}] = parseListing(listing)[""]
 
 	t.Run("rm traverses into non-empty dir", func(t *testing.T) {
-		m.input.SetValue("rm lo")
+		setInput(t, &m, "rm lo")
 		pressKey(t, &m, tea.KeyPressMsg{Code: tea.KeyTab})
 		if got := m.input.Value(); got != "rm logs/" {
 			t.Fatalf("input = %q, want %q", got, "rm logs/")
@@ -269,7 +330,7 @@ func TestRmRmdirCompletion(t *testing.T) {
 	})
 
 	t.Run("rm skips empty dir", func(t *testing.T) {
-		m.input.SetValue("rm fo")
+		setInput(t, &m, "rm fo")
 		pressKey(t, &m, tea.KeyPressMsg{Code: tea.KeyTab})
 		if got := m.input.Value(); got != "rm fo" {
 			t.Fatalf("input = %q, want unchanged", got)
@@ -277,7 +338,7 @@ func TestRmRmdirCompletion(t *testing.T) {
 	})
 
 	t.Run("rmdir completes empty dir without slash", func(t *testing.T) {
-		m.input.SetValue("rmdir fo")
+		setInput(t, &m, "rmdir fo")
 		pressKey(t, &m, tea.KeyPressMsg{Code: tea.KeyTab})
 		if got := m.input.Value(); got != "rmdir foo" {
 			t.Fatalf("input = %q, want %q", got, "rmdir foo")
@@ -285,7 +346,7 @@ func TestRmRmdirCompletion(t *testing.T) {
 	})
 
 	t.Run("rmdir skips files", func(t *testing.T) {
-		m.input.SetValue("rmdir x")
+		setInput(t, &m, "rmdir x")
 		pressKey(t, &m, tea.KeyPressMsg{Code: tea.KeyTab})
 		if got := m.input.Value(); got != "rmdir x" {
 			t.Fatalf("input = %q, want unchanged", got)
@@ -297,7 +358,7 @@ func TestTabCompletionFlow(t *testing.T) {
 	t.Parallel()
 
 	m := connectedModel(t)
-	m.input.SetValue("cat l")
+	setInput(t, &m, "cat l")
 	m.probeSeq = 1
 
 	// The probe reply both populates the cache and applies the completion.
@@ -319,7 +380,7 @@ func TestTabIgnoredWithoutCacheOrClient(t *testing.T) {
 
 	// No client and no cache: Tab must neither probe nor alter the input.
 	m := connectedModel(t)
-	m.input.SetValue("cat l")
+	setInput(t, &m, "cat l")
 	pressKey(t, &m, tea.KeyPressMsg{Code: tea.KeyTab})
 	if got := m.input.Value(); got != "cat l" {
 		t.Fatalf("input = %q, want unchanged %q", got, "cat l")
@@ -330,7 +391,7 @@ func TestStaleProbeResultDropped(t *testing.T) {
 	t.Parallel()
 
 	m := connectedModel(t)
-	m.input.SetValue("cat l")
+	setInput(t, &m, "cat l")
 	m.probeSeq = 2
 
 	updated, _ := m.Update(probeResultMsg{seq: 1, key: completionKey{}, listing: wireListing})
@@ -351,7 +412,7 @@ func TestAmbiguousCompletionListsCandidates(t *testing.T) {
 		{name: "readme.txt"},
 		{name: "reports", isDir: true},
 	}
-	m.input.SetValue("cat re")
+	setInput(t, &m, "cat re")
 
 	pressKey(t, &m, tea.KeyPressMsg{Code: tea.KeyTab})
 	if got := m.input.Value(); got != "cat re" {
@@ -421,7 +482,7 @@ func TestPassCompletion(t *testing.T) {
 	t.Parallel()
 
 	m := connectedModel(t)
-	m.input.SetValue("pass r")
+	setInput(t, &m, "pass r")
 	pressKey(t, &m, tea.KeyPressMsg{Code: tea.KeyTab})
 	if got := m.input.Value(); got != "pass reset" {
 		t.Fatalf("input = %q, want %q", got, "pass reset")
@@ -440,13 +501,13 @@ func TestJobsCompletion(t *testing.T) {
 	m.subcommands["jobs"] = toEntries(got)
 	m.indexedLists["jobs list"] = toEntries(parseIndexedList(wireJobsList, "Jobs:"))
 
-	m.input.SetValue("jobs k")
+	setInput(t, &m, "jobs k")
 	pressKey(t, &m, tea.KeyPressMsg{Code: tea.KeyTab})
 	if got := m.input.Value(); got != "jobs kill" {
 		t.Fatalf("subcommand input = %q, want %q", got, "jobs kill")
 	}
 
-	m.input.SetValue("jobs kill ")
+	setInput(t, &m, "jobs kill ")
 	pressKey(t, &m, tea.KeyPressMsg{Code: tea.KeyTab})
 	if got := m.input.Value(); got != "jobs kill 0" {
 		t.Fatalf("index input = %q, want %q", got, "jobs kill 0")
@@ -458,7 +519,7 @@ func TestHardwareSubcommandCompletion(t *testing.T) {
 
 	m := connectedModel(t)
 	m.subcommands["hardware"] = toEntries(parseSubcommandSection(wireHardwareHelp, "Commands:", "hardware"))
-	m.input.SetValue("hardware upgrade_r")
+	setInput(t, &m, "hardware upgrade_r")
 	pressKey(t, &m, tea.KeyPressMsg{Code: tea.KeyTab})
 	if got := m.input.Value(); got != "hardware upgrade_ram" {
 		t.Fatalf("input = %q, want %q", got, "hardware upgrade_ram")
@@ -470,7 +531,7 @@ func TestBitsSubcommandCompletion(t *testing.T) {
 
 	m := connectedModel(t)
 	m.subcommands["bits"] = toEntries([]string{"balance", "transfer"})
-	m.input.SetValue("bits tran")
+	setInput(t, &m, "bits tran")
 	pressKey(t, &m, tea.KeyPressMsg{Code: tea.KeyTab})
 	if got := m.input.Value(); got != "bits transfer" {
 		t.Fatalf("input = %q, want %q", got, "bits transfer")
@@ -494,7 +555,7 @@ func TestSoftwareCompletion(t *testing.T) {
 	m.indexedLists["software list"] = toEntries([]string{"0", "1", "2"})
 
 	t.Run("subcommand", func(t *testing.T) {
-		m.input.SetValue("software unin")
+		setInput(t, &m, "software unin")
 		pressKey(t, &m, tea.KeyPressMsg{Code: tea.KeyTab})
 		if got := m.input.Value(); got != "software uninstall" {
 			t.Fatalf("input = %q, want %q", got, "software uninstall")
@@ -502,7 +563,7 @@ func TestSoftwareCompletion(t *testing.T) {
 	})
 
 	t.Run("index", func(t *testing.T) {
-		m.input.SetValue("software uninstall ")
+		setInput(t, &m, "software uninstall ")
 		pressKey(t, &m, tea.KeyPressMsg{Code: tea.KeyTab})
 		if got := m.input.Value(); got != "software uninstall 0" {
 			t.Fatalf("input = %q, want %q", got, "software uninstall 0")
@@ -510,12 +571,25 @@ func TestSoftwareCompletion(t *testing.T) {
 	})
 
 	t.Run("partial index", func(t *testing.T) {
-		m.input.SetValue("software install 1")
+		setInput(t, &m, "software install 1")
 		pressKey(t, &m, tea.KeyPressMsg{Code: tea.KeyTab})
 		if got := m.input.Value(); got != "software install 1" {
 			t.Fatalf("input = %q, want unchanged %q", got, "software install 1")
 		}
 	})
+}
+
+func TestTabCompletesWordAtCursor(t *testing.T) {
+	t.Parallel()
+
+	m := vocabModel(t)
+	m.subcommands["software"] = toEntries(parseSubcommandSection(wireSoftwareHelp, "Commands:", "software"))
+	setInput(t, &m, "software install 1")
+	m.input.SetCursor(len("software inst"))
+	pressKey(t, &m, tea.KeyPressMsg{Code: tea.KeyTab})
+	if got := m.input.Value(); got != "software install 1" {
+		t.Fatalf("input = %q, want %q", got, "software install 1")
+	}
 }
 
 func TestSlavesSubcommandCompletion(t *testing.T) {
@@ -529,7 +603,7 @@ func TestSlavesSubcommandCompletion(t *testing.T) {
 		names: []string{"list"},
 	})
 	m = updated.(Model)
-	m.input.SetValue("slaves l")
+	setInput(t, &m, "slaves l")
 	pressKey(t, &m, tea.KeyPressMsg{Code: tea.KeyTab})
 	if got := m.input.Value(); got != "slaves list" {
 		t.Fatalf("input = %q, want %q", got, "slaves list")
@@ -628,7 +702,7 @@ func TestCommandCompletion(t *testing.T) {
 			t.Parallel()
 
 			m := vocabModel(t)
-			m.input.SetValue(tt.input)
+			setInput(t, &m, tt.input)
 			pressKey(t, &m, tea.KeyPressMsg{Code: tea.KeyTab})
 
 			if got := m.input.Value(); got != tt.wantInput {
@@ -648,7 +722,7 @@ func TestCategoryCompletion(t *testing.T) {
 	t.Parallel()
 
 	m := vocabModel(t)
-	m.input.SetValue("cmds fi")
+	setInput(t, &m, "cmds fi")
 	pressKey(t, &m, tea.KeyPressMsg{Code: tea.KeyTab})
 	if got := m.input.Value(); got != "cmds filesystem" {
 		t.Fatalf("input = %q, want %q", got, "cmds filesystem")
@@ -698,7 +772,7 @@ func TestVocabProbeNotDuplicated(t *testing.T) {
 
 	m := connectedModel(t)
 	m.vocabLoading = true
-	m.input.SetValue("mkd")
+	setInput(t, &m, "mkd")
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	m = updated.(Model)

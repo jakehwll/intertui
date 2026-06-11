@@ -314,12 +314,17 @@ func lsQuery(key completionKey) string {
 // position 0 uses the vocabulary probe; each declared ArgSpec handles its
 // argument kind.
 func (m *Model) completeInput(allowProbe bool) tea.Cmd {
-	t, ok := parseInputTarget(m.input.Value())
+	line := m.input.Value()
+	cursor := m.input.Position()
+	if cursor > len(line) {
+		cursor = len(line)
+	}
+	t, ok := parseInputTarget(line, cursor)
 	if !ok {
 		return nil
 	}
 	if t.argPos == 0 {
-		return m.completeVocab(t.token, allowProbe)
+		return m.completeVocab(t, allowProbe)
 	}
 
 	arg, ok := t.argSpec(m.commands)
@@ -334,7 +339,7 @@ func (m *Model) completeInput(allowProbe bool) tea.Cmd {
 	case ArgIndexedList:
 		return m.completeIndexedList(t, arg, allowProbe)
 	case ArgChoices:
-		m.completeAgainst(t.prefix, t.token, toEntries(arg.Choices), "", PathDefault)
+		m.completeAgainst(t.prefix, t.partial, t.wordSuffix, t.suffix, toEntries(arg.Choices), "", PathDefault)
 		return nil
 	case ArgPath:
 		return m.completePath(t, arg.Path, allowProbe)
@@ -351,15 +356,15 @@ func commandEntries(commands map[string]CommandSpec) []completionEntry {
 	return toEntries(names)
 }
 
-func (m *Model) completeVocab(partial string, allowProbe bool) tea.Cmd {
+func (m *Model) completeVocab(t inputTarget, allowProbe bool) tea.Cmd {
 	if m.vocab == nil {
 		if cmd := m.startVocabProbe(allowProbe); cmd != nil {
 			return cmd
 		}
-		m.completeAgainst("", partial, commandEntries(m.commands), " ", PathDefault)
+		m.completeAgainst("", t.partial, t.wordSuffix, t.suffix, commandEntries(m.commands), " ", PathDefault)
 		return nil
 	}
-	m.completeAgainst("", partial, m.vocab, " ", PathDefault)
+	m.completeAgainst("", t.partial, t.wordSuffix, t.suffix, m.vocab, " ", PathDefault)
 	return nil
 }
 
@@ -373,17 +378,17 @@ func (m *Model) completeIndexedList(t inputTarget, arg ArgSpec, allowProbe bool)
 		return probeIndexedList(m.client, arg.Probe, arg.Section, m.indexedListSeq)
 	}
 	// Empty partial: fill the lowest index (e.g. "software uninstall " → "… 0").
-	if t.token == "" && len(entries) > 0 {
+	if t.partial == "" && len(entries) > 0 {
 		names := make([]string, len(entries))
 		for i, e := range entries {
 			names[i] = e.name
 		}
 		sort.Strings(names)
-		m.input.SetValue(t.prefix + names[0])
+		m.input.SetValue(t.prefix + names[0] + t.suffix)
 		m.input.CursorEnd()
 		return nil
 	}
-	m.completeAgainst(t.prefix, t.token, entries, "", PathDefault)
+	m.completeAgainst(t.prefix, t.partial, t.wordSuffix, t.suffix, entries, "", PathDefault)
 	return nil
 }
 
@@ -396,7 +401,7 @@ func (m *Model) completeSubcommand(t inputTarget, section string, allowProbe boo
 		m.subcommandSeq++
 		return probeSubcommand(m.client, t.cmd, section, m.subcommandSeq)
 	}
-	m.completeAgainst(t.prefix, t.token, entries, "", PathDefault)
+	m.completeAgainst(t.prefix, t.partial, t.wordSuffix, t.suffix, entries, "", PathDefault)
 	return nil
 }
 
@@ -404,7 +409,7 @@ func (m *Model) completeEntries(t inputTarget, entries []completionEntry, allowP
 	if entries == nil {
 		return m.startVocabProbe(allowProbe)
 	}
-	m.completeAgainst(t.prefix, t.token, entries, "", PathDefault)
+	m.completeAgainst(t.prefix, t.partial, t.wordSuffix, t.suffix, entries, "", PathDefault)
 	return nil
 }
 
@@ -421,19 +426,19 @@ func (m *Model) completePath(t inputTarget, style PathStyle, allowProbe bool) te
 		m.probeSeq++
 		return probeListing(m.client, pt.cacheKey(), m.probeSeq)
 	}
-	m.completeAgainst(pt.tokenPrefix(), pt.partial, entries, "", style)
+	m.completeAgainst(pt.tokenPrefix(), pt.partial, t.wordSuffix, t.suffix, entries, "", style)
 	return nil
 }
 
-func (m *Model) completeAgainst(prefix, partial string, entries []completionEntry, uniqueSuffix string, style PathStyle) {
+func (m *Model) completeAgainst(prefix, partial, wordSuffix, suffix string, entries []completionEntry, uniqueSuffix string, style PathStyle) {
 	fill, matches := completeToken(entries, partial, style)
 	switch {
 	case len(matches) == 0:
 	case len(matches) == 1:
-		m.input.SetValue(prefix + fill + uniqueSuffix)
+		m.input.SetValue(prefix + fill + uniqueSuffix + suffix)
 		m.input.CursorEnd()
 	case fill != partial:
-		m.input.SetValue(prefix + fill)
+		m.input.SetValue(prefix + fill + wordSuffix + suffix)
 		m.input.CursorEnd()
 	default:
 		display := matches

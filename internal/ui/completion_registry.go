@@ -122,25 +122,53 @@ func specFromFilesystem(cmd string) (CommandSpec, bool) {
 type inputTarget struct {
 	cmd    string // set when completing an argument
 	argPos int    // 0 = command name, 1+ = argument index
-	prefix string // input before the token under the cursor
-	token  string
-	local  bool // -l/--local among arguments before the cursor
+	prefix string // input before the word under the cursor
+	token  string // full word under the cursor (used for path splitting)
+	partial string // word prefix before the cursor (used for matching)
+	wordSuffix string // remainder of the word after the cursor
+	suffix string // input after the word under the cursor
+	local  bool   // -l/--local among arguments before the cursor
 }
 
-func parseInputTarget(line string) (inputTarget, bool) {
+// tokenBounds returns the whitespace-delimited word surrounding cursor.
+func tokenBounds(line string, cursor int) (start, end int) {
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor > len(line) {
+		cursor = len(line)
+	}
+	start = cursor
+	for start > 0 && line[start-1] != ' ' {
+		start--
+	}
+	end = cursor
+	for end < len(line) && line[end] != ' ' {
+		end++
+	}
+	return start, end
+}
+
+func parseInputTarget(line string, cursor int) (inputTarget, bool) {
 	if line == "" {
 		return inputTarget{argPos: 0}, true
 	}
-	cut := strings.LastIndex(line, " ") + 1
-	t := inputTarget{prefix: line[:cut], token: line[cut:]}
-	if cut == 0 {
-		t.token = line
-		return t, true
+	start, end := tokenBounds(line, cursor)
+	if cursor > end {
+		cursor = end
+	}
+	t := inputTarget{
+		prefix:     line[:start],
+		token:      line[start:end],
+		partial:    line[start:cursor],
+		wordSuffix: line[cursor:end],
+		suffix:     line[end:],
 	}
 	t.cmd, _, _ = strings.Cut(line, " ")
 	t.argPos = strings.Count(t.prefix, " ")
-	for _, arg := range strings.Fields(t.prefix)[1:] {
-		if arg == "-l" || arg == "--local" {
+	fields := strings.Fields(t.prefix)
+	for i := 1; i < len(fields); i++ {
+		if fields[i] == "-l" || fields[i] == "--local" {
 			t.local = true
 		}
 	}
