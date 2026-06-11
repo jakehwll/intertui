@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Real payloads observed on the wire (¬ color codes, tab-indented children).
@@ -240,12 +241,24 @@ func TestCandidateColumns(t *testing.T) {
 		t.Fatalf("expected multiple rows, got %d:\n%s", len(rows), got)
 	}
 	for _, row := range rows {
-		if len(row) > 40 {
-			t.Fatalf("row wider than terminal: len=%d %q", len(row), row)
+		if ansi.StringWidth(row) > 40 {
+			t.Fatalf("row wider than terminal: width=%d %q", ansi.StringWidth(row), row)
 		}
 	}
 	if !strings.Contains(got, "colors/colours") {
 		t.Fatalf("full name missing:\n%s", got)
+	}
+}
+
+func TestCandidateColumnsWideChars(t *testing.T) {
+	t.Parallel()
+
+	// Sorted: "a" then "文件" (width 4). Narrow name is padded to match.
+	got := candidateColumns([]completionEntry{{name: "文件"}, {name: "a"}}, 40)
+	row := strings.Split(got, "\n")[0]
+	want := "a     文件" // "a"+3 pad spaces (width 4), gap 2, "文件" (width 4)
+	if row != want {
+		t.Fatalf("row = %q, want %q (display width %d)", row, want, ansi.StringWidth(want))
 	}
 }
 

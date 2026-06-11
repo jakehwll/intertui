@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"intertui/internal/intercept"
 )
@@ -272,12 +273,12 @@ func candidateColumns(matches []completionEntry, width int) string {
 		width = 80
 	}
 
-	maxLen := 0
+	maxWidth := 0
 	for _, name := range names {
-		maxLen = max(maxLen, len(name))
+		maxWidth = max(maxWidth, ansi.StringWidth(name))
 	}
 	const gap = 2
-	colWidth := maxLen + gap
+	colWidth := maxWidth + gap
 	ncol := max(1, width/colWidth)
 	if ncol > len(names) {
 		ncol = len(names)
@@ -292,7 +293,9 @@ func candidateColumns(matches []completionEntry, width int) string {
 			if idx >= len(names) {
 				break
 			}
-			parts = append(parts, names[idx]+strings.Repeat(" ", maxLen-len(names[idx])))
+			name := names[idx]
+			pad := maxWidth - ansi.StringWidth(name)
+			parts = append(parts, name+strings.Repeat(" ", pad))
 		}
 		rows = append(rows, strings.Join(parts, strings.Repeat(" ", gap)))
 	}
