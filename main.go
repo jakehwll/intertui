@@ -48,7 +48,7 @@ func run(cfg config.Config) error {
 	logPath, _ := filelog.Path()
 	filelog.Info("start target=%s offline=%v ws=%v user=%s log=%s", cfg.DialDescription(), cfg.Offline, cfg.WS, cfg.User, logPath)
 
-	p := tea.NewProgram(ui.New(cfg), tea.WithFPS(120))
+	p := tea.NewProgram(ui.New(cfg), tea.WithFPS(30))
 
 	if _, err := p.Run(); err != nil {
 		return err

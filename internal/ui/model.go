@@ -2,17 +2,19 @@ package ui
 
 import (
 	"strings"
+	"time"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	"github.com/atotto/clipboard"
+	"github.com/charmbracelet/x/ansi"
 
 	"intertui/internal/config"
 	"intertui/internal/intercept"
 	filelog "intertui/internal/log"
 )
-
-const inputRows = 1
 
 type connState int
 
@@ -22,6 +24,13 @@ const (
 	stateError
 )
 
+// quitConfirmWindow is how long the Ctrl+C confirmation stays armed.
+const quitConfirmWindow = 2 * time.Second
+
+// quitConfirmTimeoutMsg resets the quit confirmation if no second Ctrl+C
+// arrived. seq guards against stale timers clearing a re-armed confirm.
+type quitConfirmTimeoutMsg struct{ seq int }
+
 // Model is the Bubble Tea model for the terminal UI.
 type Model struct {
 	cfg    config.Config
@@ -30,18 +39,34 @@ type Model struct {
 	messages []string
 	history  []string
 
+	// displayLines is messages hard-wrapped to the terminal width so each
+	// entry is exactly one screen row. This makes mouse-selection mapping
+	// (screen cell -> text) exact.
+	displayLines []string
+
 	viewport viewport.Model
 	input    textinput.Model
 
-	state          connState
-	connectedUser  string
-	reconnecting   bool
+	state         connState
+	connectedUser string
+	reconnecting  bool
 
-	width        int
-	height       int
-	ready        bool
-	historyIndex int
-	historyDraft string
+	width  int
+	height int
+	ready  bool
+
+	historyIndex   int
+	historyDraft   string
+	quitConfirm    bool
+	quitConfirmSeq int
+
+	// In-app mouse selection (Claude Code-style): we capture the mouse, draw
+	// the highlight ourselves, and copy to the clipboard on release.
+	selecting            bool // left button held, dragging
+	selActive            bool // selection exists (visible highlight)
+	selStartX, selStartY int  // anchor: X = cell column, Y = displayLines index
+	selEndX, selEndY     int
+	copied               bool
 }
 
 // New returns the initial UI model.
@@ -49,35 +74,25 @@ func New(cfg config.Config) Model {
 	ti := textinput.New()
 	ti.Placeholder = "type a command..."
 	ti.CharLimit = 280
+	styles := textinput.DefaultDarkStyles()
+	styles.Cursor.Blink = false
+	ti.SetStyles(styles)
 
-	m := Model{
-		cfg:      cfg,
-		messages: []string{clientLine("Intercept terminal")},
-		input:    ti,
-		state:    stateConnecting,
-	}
-
+	m := Model{cfg: cfg, input: ti, state: stateConnecting}
 	if cfg.Offline && !cfg.HasCreds() {
 		m.cfg.User = "offline"
 		m.cfg.Pass = "offline"
 	}
-	m.appendStatus("Target: " + cfg.DialDescription())
-
 	return m
 }
 
-// Init implements tea.Model.
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{textinput.Blink}
-
 	if m.state == stateConnecting {
-		cmds = append(cmds, startClient(m.cfg))
+		return startClient(m.cfg)
 	}
-
-	return tea.Batch(cmds...)
+	return nil
 }
 
-// Update implements tea.Model.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
@@ -85,21 +100,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-
 		if !m.ready {
 			m.viewport = viewport.New()
-			m.viewport.KeyMap = scrollKeyMap()
-			m.viewport.SoftWrap = true
-			m.viewport.MouseWheelEnabled = true
-			m.viewport.MouseWheelDelta = 1
+			m.viewport.SoftWrap = false
+			m.viewport.FillHeight = true
+			m.viewport.KeyMap = logScrollKeys()
 			m.ready = true
 		}
-
 		m.layout()
-		m.updateViewport()
+		m.rewrap()
+		m.clearSelection()
 
 	case connectProgressMsg:
-		m.appendStatus(msg.line)
 		return m, pollConnect(msg.statusCh, msg.doneCh)
 
 	case clientReadyMsg:
@@ -107,8 +119,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reconnecting = false
 			m.state = stateError
 			filelog.Info("connect failed err=%v", msg.err)
-			m.messages = append(m.messages, clientLine("Connection failed: "+msg.err.Error()))
-			m.updateViewport()
+			m.log(dim.Render("Connection failed: " + msg.err.Error()))
 			break
 		}
 		filelog.Info("connect ok user=%s", msg.user)
@@ -117,18 +128,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = stateConnected
 		if m.reconnecting {
 			m.reconnecting = false
-			m.appendStatus("Reconnected.")
 		} else {
 			m.messages = nil
+			m.rewrap()
+			m.clearSelection()
 		}
 		m.input.Focus()
-		m.updateViewport()
 		m.viewport.GotoBottom()
 		cmds = append(cmds, waitClientMsg(m.client))
 
 	case intercept.GameLineMsg:
-		m.messages = append(m.messages, msg.Line)
-		m.updateViewport()
+		m.log(msg.Line)
 		if m.client != nil {
 			cmds = append(cmds, waitClientMsg(m.client))
 		}
@@ -143,40 +153,102 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				filelog.Info("disconnect")
 			}
-			m.messages = append(m.messages, clientLine(line))
-			m.updateViewport()
+			m.log(dim.Render(line))
 		}
 
+	case quitConfirmTimeoutMsg:
+		if msg.seq == m.quitConfirmSeq {
+			m.quitConfirm = false
+		}
+		return m, nil
+
+	case tea.MouseWheelMsg:
+		var wheelCmd tea.Cmd
+		m.viewport, wheelCmd = m.viewport.Update(msg)
+		return m, wheelCmd
+
+	case tea.MouseClickMsg:
+		m.copied = false
+		if msg.Button == tea.MouseLeft && msg.Y < m.viewport.Height() && len(m.displayLines) > 0 {
+			x, y := m.clampToLog(msg.X, msg.Y)
+			m.selecting = true
+			m.selActive = false
+			m.selStartX, m.selStartY = x, y
+			m.selEndX, m.selEndY = x, y
+		} else {
+			m.clearSelection()
+		}
+		return m, nil
+
+	case tea.MouseMotionMsg:
+		if m.selecting {
+			m.selEndX, m.selEndY = m.clampToLog(msg.X, msg.Y)
+			m.selActive = m.selStartX != m.selEndX || m.selStartY != m.selEndY
+		}
+		return m, nil
+
+	case tea.MouseReleaseMsg:
+		if m.selecting {
+			m.selecting = false
+			if m.selActive {
+				if text := m.selectionText(); text != "" {
+					m.copied = true
+					return m, copyText(text)
+				}
+			}
+			m.clearSelection()
+		}
+		return m, nil
+
 	case tea.KeyPressMsg:
+		m.copied = false
+		if m.quitConfirm && msg.String() != "ctrl+c" {
+			m.quitConfirm = false
+		}
 		switch msg.String() {
-		case "ctrl+c", "esc":
+		case "ctrl+c":
+			if m.quitConfirm {
+				if m.client != nil {
+					m.client.Close()
+				}
+				return m, tea.Quit
+			}
+			m.quitConfirm = true
+			m.quitConfirmSeq++
+			seq := m.quitConfirmSeq
+			return m, tea.Tick(quitConfirmWindow, func(time.Time) tea.Msg {
+				return quitConfirmTimeoutMsg{seq: seq}
+			})
+		case "esc":
+			if m.selecting || m.selActive {
+				m.clearSelection()
+				return m, nil
+			}
 			if m.client != nil {
 				m.client.Close()
 			}
 			return m, tea.Quit
-
-		case "ctrl+p", "ctrl+up":
+		case "ctrl+shift+c":
+			cmds = append(cmds, copyLog(m.messages))
+		case "up", "ctrl+p", "ctrl+up":
 			if m.state == stateConnected {
 				m.historyUp()
-				return m, nil
+				return m, tea.Batch(cmds...)
 			}
-
-		case "ctrl+n", "ctrl+down":
+		case "down", "ctrl+n", "ctrl+down":
 			if m.state == stateConnected {
 				m.historyDown()
-				return m, nil
+				return m, tea.Batch(cmds...)
 			}
-
 		case "enter":
 			if m.state == stateConnected {
-				if value := strings.TrimSpace(m.input.Value()); value != "" {
-					m.submitMessage(value)
+				if v := strings.TrimSpace(m.input.Value()); v != "" {
+					m.submit(v)
 				}
 			}
-
 		case "r":
 			if m.state == stateError {
-				cmds = append(cmds, m.beginReconnect()...)
+				cmds = append(cmds, m.reconnect()...)
 				return m, tea.Batch(cmds...)
 			}
 		}
@@ -186,11 +258,182 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.viewport, cmd = m.viewport.Update(msg)
 	cmds = append(cmds, cmd)
 
-	if m.state == stateConnected && !isScrollMsg(msg) {
-		var cmd tea.Cmd
+	if m.state == stateConnected && !logScrollKey(msg) {
 		m.input, cmd = m.input.Update(msg)
 		cmds = append(cmds, cmd)
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+func (m *Model) log(line string) {
+	m.messages = append(m.messages, line)
+	m.displayLines = append(m.displayLines, wrapLine(line, m.width)...)
+	m.syncLog()
+	m.viewport.GotoBottom()
+}
+
+func (m *Model) rewrap() {
+	m.displayLines = m.displayLines[:0]
+	for _, msg := range m.messages {
+		m.displayLines = append(m.displayLines, wrapLine(msg, m.width)...)
+	}
+	m.syncLog()
+}
+
+func (m *Model) syncLog() {
+	m.viewport.SetContent(strings.Join(m.displayLines, "\n"))
+}
+
+func wrapLine(line string, w int) []string {
+	if w <= 0 || ansi.StringWidth(line) <= w {
+		return []string{line}
+	}
+	return strings.Split(ansi.Hardwrap(line, w, true), "\n")
+}
+
+// clampToLog converts screen coordinates to (cell column, displayLines index).
+func (m Model) clampToLog(x, y int) (int, int) {
+	if x < 0 {
+		x = 0
+	}
+	if w := max(1, m.width); x >= w {
+		x = w - 1
+	}
+	y = max(0, min(y, m.viewport.Height()-1))
+	line := m.viewport.YOffset() + y
+	line = max(0, min(line, len(m.displayLines)-1))
+	return x, line
+}
+
+// selBounds returns the selection normalized to top-left -> bottom-right order.
+func (m Model) selBounds() (x0, y0, x1, y1 int) {
+	x0, y0, x1, y1 = m.selStartX, m.selStartY, m.selEndX, m.selEndY
+	if y1 < y0 || (y0 == y1 && x1 < x0) {
+		x0, y0, x1, y1 = x1, y1, x0, y0
+	}
+	return
+}
+
+// selectionText extracts the selected text (end cell inclusive), ANSI stripped.
+func (m Model) selectionText() string {
+	x0, y0, x1, y1 := m.selBounds()
+	var out []string
+	for ln := y0; ln <= y1 && ln < len(m.displayLines); ln++ {
+		line := m.displayLines[ln]
+		from, to := 0, ansi.StringWidth(line)
+		if ln == y0 {
+			from = x0
+		}
+		if ln == y1 {
+			to = min(to, x1+1)
+		}
+		seg := ""
+		if from < to {
+			seg = ansi.Strip(ansi.Cut(line, from, to))
+		}
+		out = append(out, strings.TrimRight(seg, " "))
+	}
+	return strings.Join(out, "\n")
+}
+
+func (m *Model) clearSelection() {
+	m.selecting = false
+	m.selActive = false
+}
+
+// copyText writes to the system clipboard directly and via OSC52 so copy
+// works both locally and over SSH.
+func copyText(text string) tea.Cmd {
+	return tea.Batch(
+		tea.SetClipboard(text),
+		func() tea.Msg {
+			_ = clipboard.WriteAll(text)
+			return nil
+		},
+	)
+}
+
+func logScrollKeys() viewport.KeyMap {
+	return viewport.KeyMap{
+		PageDown:     key.NewBinding(key.WithKeys("pgdown")),
+		PageUp:       key.NewBinding(key.WithKeys("pgup")),
+		HalfPageUp:   key.NewBinding(key.WithKeys("ctrl+u")),
+		HalfPageDown: key.NewBinding(key.WithKeys("ctrl+d")),
+	}
+}
+
+func logScrollKey(msg tea.Msg) bool {
+	k, ok := msg.(tea.KeyPressMsg)
+	if !ok {
+		return false
+	}
+	km := logScrollKeys()
+	return key.Matches(k, km.PageUp) || key.Matches(k, km.PageDown) ||
+		key.Matches(k, km.HalfPageUp) || key.Matches(k, km.HalfPageDown)
+}
+
+func copyLog(messages []string) tea.Cmd {
+	lines := make([]string, len(messages))
+	for i, line := range messages {
+		lines[i] = intercept.Clean(line)
+	}
+	return copyText(strings.Join(lines, "\n"))
+}
+
+func (m *Model) historyUp() {
+	if len(m.history) == 0 {
+		return
+	}
+	if m.historyIndex == -1 {
+		m.historyDraft = m.input.Value()
+		m.historyIndex = len(m.history) - 1
+	} else if m.historyIndex > 0 {
+		m.historyIndex--
+	}
+	m.input.SetValue(m.history[m.historyIndex])
+	m.input.CursorEnd()
+}
+
+func (m *Model) historyDown() {
+	if m.historyIndex == -1 {
+		return
+	}
+	if m.historyIndex < len(m.history)-1 {
+		m.historyIndex++
+		m.input.SetValue(m.history[m.historyIndex])
+	} else {
+		m.historyIndex = -1
+		m.input.SetValue(m.historyDraft)
+	}
+	m.input.CursorEnd()
+}
+
+func (m *Model) submit(value string) {
+	if m.client != nil {
+		m.client.SendCommand(value)
+	}
+	if len(m.history) == 0 || m.history[len(m.history)-1] != value {
+		m.history = append(m.history, value)
+	}
+	m.historyIndex = -1
+	m.historyDraft = ""
+	m.input.SetValue("")
+	m.input.CursorEnd()
+	m.log(dim.Render("> " + value))
+}
+
+func (m *Model) reconnect() []tea.Cmd {
+	if m.client != nil {
+		m.client.Close()
+		m.client = nil
+	}
+	m.reconnecting = true
+	m.state = stateConnecting
+	m.historyIndex = -1
+	m.historyDraft = ""
+	m.input.Blur()
+	m.input.SetValue("")
+	filelog.Info("reconnect target=%s", m.cfg.DialDescription())
+	return []tea.Cmd{startClient(m.cfg)}
 }

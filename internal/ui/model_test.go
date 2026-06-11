@@ -59,14 +59,12 @@ func TestModelUpdateConnect(t *testing.T) {
 		wantCmd    bool
 	}{
 		{
-			name: "connect progress appends status",
+			name: "connect progress drains status quietly",
 			msg: connectProgressMsg{
-				line:     "Logging in…",
 				statusCh: closedStringCh(),
 				doneCh:   make(chan clientReadyMsg),
 			},
 			wantState: stateConnecting,
-			wantInLog: []string{"Logging in"},
 			wantCmd:   true,
 		},
 		{
@@ -74,7 +72,6 @@ func TestModelUpdateConnect(t *testing.T) {
 			msg:       clientReadyMsg{user: "alice"},
 			wantState: stateConnected,
 			wantUser:  "alice",
-			wantNoLog: []string{"Intercept terminal", "Target:"},
 			wantCmd:   true,
 		},
 		{
@@ -132,13 +129,11 @@ func TestModelUpdateGameLine(t *testing.T) {
 			name:      "append game output",
 			line:      "welcome to intercept",
 			wantInLog: []string{"welcome to intercept"},
-			wantCmd:   false,
 		},
 		{
 			name:      "append unknown event summary",
 			line:      "server → clink, ok",
 			wantInLog: []string{"server → clink, ok"},
-			wantCmd:   false,
 		},
 	}
 
@@ -249,6 +244,18 @@ func TestModelUpdateHistory(t *testing.T) {
 			wantHist:  []string{"help", "scan"},
 		},
 		{
+			name: "up and down walk command history",
+			actions: func(t *testing.T, m *Model) {
+				submit(t, m, "help")
+				submit(t, m, "scan")
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+			},
+			wantInput: "scan",
+			wantHist:  []string{"help", "scan"},
+		},
+		{
 			name: "ctrl+n restores draft after history",
 			actions: func(t *testing.T, m *Model) {
 				submit(t, m, "help")
@@ -319,7 +326,7 @@ func TestModelUpdateReconnect(t *testing.T) {
 				pressKey(t, m, tea.KeyPressMsg{Code: 'r'})
 			},
 			wantState: stateConnecting,
-			wantInLog: []string{"game output", "Disconnected.", "Reconnecting"},
+			wantInLog: []string{"game output", "Disconnected."},
 		},
 		{
 			name:  "r is ignored while connected",
@@ -338,7 +345,7 @@ func TestModelUpdateReconnect(t *testing.T) {
 				*m = updated.(Model)
 			},
 			wantState: stateConnected,
-			wantInLog: []string{"game output", "Disconnected.", "Reconnecting", "Reconnected."},
+			wantInLog: []string{"game output", "Disconnected."},
 		},
 		{
 			name:  "reconnect failure returns to error state",
@@ -349,7 +356,7 @@ func TestModelUpdateReconnect(t *testing.T) {
 				*m = updated.(Model)
 			},
 			wantState: stateError,
-			wantInLog: []string{"game output", "Reconnecting", "Connection failed: dial refused"},
+			wantInLog: []string{"game output", "Connection failed: dial refused"},
 		},
 	}
 
@@ -369,6 +376,124 @@ func TestModelUpdateReconnect(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestMouseSelection(t *testing.T) {
+	t.Parallel()
+
+	m := connectedModel(t)
+	for _, line := range []string{"alpha beta", "gamma delta"} {
+		updated, _ := m.Update(intercept.GameLineMsg{Line: line})
+		m = updated.(Model)
+	}
+
+	updated, _ := m.Update(tea.MouseClickMsg{X: 0, Y: 0, Button: tea.MouseLeft})
+	m = updated.(Model)
+	if !m.selecting {
+		t.Fatal("expected selecting after left click in log")
+	}
+
+	updated, _ = m.Update(tea.MouseMotionMsg{X: 4, Y: 0, Button: tea.MouseLeft})
+	m = updated.(Model)
+	if !m.selActive {
+		t.Fatal("expected active selection after drag")
+	}
+	if got := m.selectionText(); got != "alpha" {
+		t.Fatalf("selectionText() = %q, want %q", got, "alpha")
+	}
+
+	updated, cmd := m.Update(tea.MouseReleaseMsg{X: 4, Y: 0, Button: tea.MouseLeft})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected copy cmd on release")
+	}
+	if m.selecting {
+		t.Fatal("expected selecting=false after release")
+	}
+	if !m.selActive {
+		t.Fatal("expected selection to stay visible after release")
+	}
+	if !m.copied {
+		t.Fatal("expected copied flag after release")
+	}
+
+	// Esc clears the selection instead of quitting.
+	updated, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = updated.(Model)
+	if m.selActive {
+		t.Fatal("expected esc to clear selection")
+	}
+	if cmd != nil {
+		t.Fatal("expected esc with selection to not quit")
+	}
+}
+
+func TestMouseSelectionMultiline(t *testing.T) {
+	t.Parallel()
+
+	m := connectedModel(t)
+	for _, line := range []string{"alpha beta", "gamma delta"} {
+		updated, _ := m.Update(intercept.GameLineMsg{Line: line})
+		m = updated.(Model)
+	}
+
+	updated, _ := m.Update(tea.MouseClickMsg{X: 6, Y: 0, Button: tea.MouseLeft})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.MouseMotionMsg{X: 4, Y: 1, Button: tea.MouseLeft})
+	m = updated.(Model)
+
+	if got, want := m.selectionText(), "beta\ngamma"; got != want {
+		t.Fatalf("selectionText() = %q, want %q", got, want)
+	}
+}
+
+func TestQuitConfirm(t *testing.T) {
+	t.Parallel()
+
+	m := connectedModel(t)
+	updated, cmd := m.Update(ctrlKey('c'))
+	model := updated.(Model)
+	if !model.quitConfirm {
+		t.Fatal("expected quitConfirm after first ctrl+c")
+	}
+	if cmd == nil {
+		t.Fatal("expected timeout cmd on first ctrl+c")
+	}
+
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a'})
+	model = updated.(Model)
+	if model.quitConfirm {
+		t.Fatal("expected quitConfirm cleared after typing")
+	}
+}
+
+func TestQuitConfirmTimeout(t *testing.T) {
+	t.Parallel()
+
+	m := connectedModel(t)
+	updated, _ := m.Update(ctrlKey('c'))
+	m = updated.(Model)
+
+	// A stale timer (older seq) must not clear a re-armed confirm.
+	updated, _ = m.Update(quitConfirmTimeoutMsg{seq: m.quitConfirmSeq - 1})
+	m = updated.(Model)
+	if !m.quitConfirm {
+		t.Fatal("stale timeout should not clear quitConfirm")
+	}
+
+	// The matching timer resets the confirmation.
+	updated, _ = m.Update(quitConfirmTimeoutMsg{seq: m.quitConfirmSeq})
+	m = updated.(Model)
+	if m.quitConfirm {
+		t.Fatal("expected quitConfirm cleared after timeout")
+	}
+
+	// After the reset, ctrl+c arms again instead of quitting.
+	updated, _ = m.Update(ctrlKey('c'))
+	m = updated.(Model)
+	if !m.quitConfirm {
+		t.Fatal("expected quitConfirm re-armed after timeout reset")
 	}
 }
 

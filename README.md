@@ -8,7 +8,7 @@ This project is unofficial and not affiliated with the game or its authors.
 
 ## Features
 
-- Full-screen TUI with scrollable game log and command input
+- Fullscreen UI in the style of Claude Code: log fills the screen with input and status pinned at the bottom; mouse wheel scrolls, and click-drag selects text in-app, copying it to your clipboard on release
 - ANSI colors for in-game `¬` color codes
 - TCP transport (default) with optional WebSocket mode
 - Username/password login (TCP) or extended WebSocket login flows
@@ -87,13 +87,17 @@ intertui --server HOST --user YOU --pass SECRET
 | Key | Action |
 |-----|--------|
 | `Enter` | Send command |
-| `↑` / `↓` | Scroll log |
-| `PgUp` / `PgDn` | Page scroll |
-| `Ctrl+U` / `Ctrl+D` | Half-page scroll |
+| `↑` / `↓` | Command history |
 | `Ctrl+P` / `Ctrl+N` | Command history |
+| `PgUp` / `PgDn` | Scroll log |
+| `Ctrl+U` / `Ctrl+D` | Half-page scroll |
+| Mouse wheel / trackpad | Scroll log |
+| Click-drag | Select log text (copies to clipboard on release) |
+| Shift+click-drag | Native terminal selection (bypasses the app) |
+| `Ctrl+Shift+C` | Copy entire log to clipboard |
 | `r` | Reconnect (after disconnect or failed login) |
-| `Ctrl+C` / `Esc` | Quit |
-| Mouse wheel | Scroll log |
+| `Ctrl+C` | Quit (press twice to confirm) |
+| `Esc` | Clear selection, or quit when nothing is selected |
 
 ## Configuration
 
