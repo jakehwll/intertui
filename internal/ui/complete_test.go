@@ -387,6 +387,52 @@ func TestTabIgnoredWithoutCacheOrClient(t *testing.T) {
 	}
 }
 
+func TestProbeErrorLogged(t *testing.T) {
+	t.Parallel()
+
+	err := errTest("timed out waiting for ls response")
+
+	t.Run("listing", func(t *testing.T) {
+		t.Parallel()
+
+		m := connectedModel(t)
+		m.probeSeq = 1
+		updated, _ := m.Update(probeResultMsg{seq: 1, key: completionKey{}, err: err})
+		m = updated.(Model)
+		if !hasMessage(m.messages, "tab completion") {
+			t.Fatalf("probe error not logged: %#v", m.messages)
+		}
+	})
+
+	t.Run("stale listing error is silent", func(t *testing.T) {
+		t.Parallel()
+
+		m := connectedModel(t)
+		m.probeSeq = 2
+		updated, _ := m.Update(probeResultMsg{seq: 1, key: completionKey{}, err: err})
+		m = updated.(Model)
+		if hasMessage(m.messages, "tab completion") {
+			t.Fatalf("stale probe error logged: %#v", m.messages)
+		}
+	})
+
+	t.Run("vocab", func(t *testing.T) {
+		t.Parallel()
+
+		m := connectedModel(t)
+		m.vocabSeq = 1
+		m.vocabLoading = true
+		updated, _ := m.Update(vocabResultMsg{seq: 1, err: err})
+		m = updated.(Model)
+		if m.vocabLoading {
+			t.Fatal("vocabLoading not cleared after error")
+		}
+		if !hasMessage(m.messages, "tab completion") {
+			t.Fatalf("vocab probe error not logged: %#v", m.messages)
+		}
+	})
+}
+
 func TestStaleProbeResultDropped(t *testing.T) {
 	t.Parallel()
 

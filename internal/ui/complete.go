@@ -470,8 +470,19 @@ func probeIndexedList(client *intercept.Client, probe, section string, seq int) 
 	}
 }
 
+func (m *Model) logProbeError(err error) {
+	if err == nil {
+		return
+	}
+	m.log(dim.Render("tab completion: " + err.Error()))
+}
+
 func (m *Model) applyIndexedListResult(msg indexedListResultMsg) {
-	if msg.seq != m.indexedListSeq || msg.err != nil {
+	if msg.seq != m.indexedListSeq {
+		return
+	}
+	if msg.err != nil {
+		m.logProbeError(msg.err)
 		return
 	}
 	m.indexedLists[msg.probe] = toEntries(msg.indices)
@@ -494,7 +505,11 @@ func probeSubcommand(client *intercept.Client, cmd, section string, seq int) tea
 }
 
 func (m *Model) applySubcommandResult(msg subcommandResultMsg) {
-	if msg.seq != m.subcommandSeq || msg.err != nil {
+	if msg.seq != m.subcommandSeq {
+		return
+	}
+	if msg.err != nil {
+		m.logProbeError(msg.err)
 		return
 	}
 	m.subcommands[msg.cmd] = toEntries(msg.names)
@@ -554,6 +569,7 @@ func (m *Model) applyVocabResult(msg vocabResultMsg) {
 	}
 	m.vocabLoading = false
 	if msg.err != nil {
+		m.logProbeError(msg.err)
 		return
 	}
 	m.categories = toEntries(msg.categories)
@@ -567,7 +583,11 @@ func (m *Model) applyVocabResult(msg vocabResultMsg) {
 }
 
 func (m *Model) applyProbeResult(msg probeResultMsg) {
-	if msg.seq != m.probeSeq || msg.err != nil {
+	if msg.seq != m.probeSeq {
+		return
+	}
+	if msg.err != nil {
+		m.logProbeError(msg.err)
 		return
 	}
 	for dir, entries := range parseListing(msg.listing) {
