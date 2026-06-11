@@ -248,13 +248,13 @@ func completeToken(entries []completionEntry, partial string, style PathStyle) (
 }
 
 func commonPrefix(a, b string) string {
-	n := min(len(a), len(b))
-	for i := 0; i < n; i++ {
-		if a[i] != b[i] {
-			return a[:i]
-		}
+	ar, br := []rune(a), []rune(b)
+	n := min(len(ar), len(br))
+	i := 0
+	for i < n && ar[i] == br[i] {
+		i++
 	}
-	return a[:n]
+	return string(ar[:i])
 }
 
 func candidateColumns(matches []completionEntry, width int) string {

@@ -227,6 +227,23 @@ func TestParsePathTarget(t *testing.T) {
 	}
 }
 
+func TestCommonPrefix(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		a, b, want string
+	}{
+		{"cat", "clear", "c"},
+		{"文件", "文本文", "文"},
+		{"café", "caffeine", "caf"},
+	}
+	for _, tt := range tests {
+		if got := commonPrefix(tt.a, tt.b); got != tt.want {
+			t.Fatalf("commonPrefix(%q, %q) = %q, want %q", tt.a, tt.b, got, tt.want)
+		}
+	}
+}
+
 func TestCandidateColumns(t *testing.T) {
 	t.Parallel()
 
