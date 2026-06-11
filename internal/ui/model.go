@@ -270,7 +270,11 @@ func (m *Model) log(line string) {
 	m.messages = append(m.messages, line)
 	m.displayLines = append(m.displayLines, wrapLine(line, m.width)...)
 	m.syncLog()
-	m.viewport.GotoBottom()
+	// Don't auto-follow while the user is dragging a selection, or the text
+	// would slide out from under the cursor.
+	if !m.selecting {
+		m.viewport.GotoBottom()
+	}
 }
 
 func (m *Model) rewrap() {

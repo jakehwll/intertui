@@ -429,6 +429,62 @@ func TestMouseSelection(t *testing.T) {
 	}
 }
 
+func TestMouseSelectionBottomLine(t *testing.T) {
+	t.Parallel()
+
+	m := connectedModel(t)
+	// 24-row terminal, 3 chrome rows -> 21 log rows. Fill past one screen so
+	// the viewport scrolls and the last line sits on the bottom rows.
+	for i := 0; i < 30; i++ {
+		updated, _ := m.Update(intercept.GameLineMsg{Line: strings.Repeat("x", 5) + " line"})
+		m = updated.(Model)
+	}
+
+	lastRow := m.viewport.Height() - 1
+	updated, _ := m.Update(tea.MouseClickMsg{X: 0, Y: lastRow - 1, Button: tea.MouseLeft})
+	m = updated.(Model)
+	// Drag below the viewport into the chrome; must clamp to the last line.
+	updated, _ = m.Update(tea.MouseMotionMsg{X: 9, Y: lastRow + 2, Button: tea.MouseLeft})
+	m = updated.(Model)
+
+	want := "xxxxx line\nxxxxx line"
+	if got := m.selectionText(); got != want {
+		t.Fatalf("selectionText() = %q, want %q", got, want)
+	}
+}
+
+func TestNewLinesDoNotScrollDuringSelection(t *testing.T) {
+	t.Parallel()
+
+	m := connectedModel(t)
+	for i := 0; i < 30; i++ {
+		updated, _ := m.Update(intercept.GameLineMsg{Line: "old line"})
+		m = updated.(Model)
+	}
+	offBefore := m.viewport.YOffset()
+
+	updated, _ := m.Update(tea.MouseClickMsg{X: 0, Y: 0, Button: tea.MouseLeft})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.MouseMotionMsg{X: 3, Y: 1, Button: tea.MouseLeft})
+	m = updated.(Model)
+
+	// New output mid-drag must not yank the viewport to the bottom.
+	updated, _ = m.Update(intercept.GameLineMsg{Line: "new line"})
+	m = updated.(Model)
+	if got := m.viewport.YOffset(); got != offBefore {
+		t.Fatalf("YOffset = %d during drag, want %d (no auto-scroll)", got, offBefore)
+	}
+
+	// After release, auto-follow resumes on the next line.
+	updated, _ = m.Update(tea.MouseReleaseMsg{X: 3, Y: 1, Button: tea.MouseLeft})
+	m = updated.(Model)
+	updated, _ = m.Update(intercept.GameLineMsg{Line: "after release"})
+	m = updated.(Model)
+	if got := m.viewport.YOffset(); got == offBefore {
+		t.Fatal("expected auto-follow to resume after release")
+	}
+}
+
 func TestMouseSelectionMultiline(t *testing.T) {
 	t.Parallel()
 
