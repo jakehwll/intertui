@@ -31,7 +31,7 @@ jobs:
         run: go test ./...
 
       - name: Build WASM
-        run: bash scripts/build-wasm.sh
+        run: bash web/build.sh
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

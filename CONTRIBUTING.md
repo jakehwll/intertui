@@ -41,6 +41,8 @@ intertui/
   cmd/
     dev/           # offline mock server + TUI (not installed)
     probe/         # low-level protocol debugger
+    wasm/          # browser build entrypoint
+  web/             # browser shell, proxy, WASM build — see web/README.md
   internal/
     constants/     # DEFAULT_PORT
     config/        # CLI flags and config file

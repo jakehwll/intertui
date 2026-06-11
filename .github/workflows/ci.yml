@@ -26,4 +26,4 @@ jobs:
         run: go vet ./...
 
       - name: Build WASM
-        run: bash scripts/build-wasm.sh
+        run: bash web/build.sh

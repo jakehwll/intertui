@@ -2,7 +2,7 @@
 //
 // Usage:
 //
-//	./scripts/build-wasm.sh
+//	./web/build.sh
 //	go run ./web/serve.go
 //	open 'http://localhost:8080/?server=GAME_HOST&user=YOU&pass=SECRET'
 //

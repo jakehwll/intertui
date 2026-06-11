@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+WEB="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
 echo "Vendoring dependencies for WASM patches..."
@@ -28,13 +29,9 @@ CURSED_GO="vendor/charm.land/bubbletea/v2/cursed_renderer.go"
 UV_GO="vendor/github.com/charmbracelet/ultraviolet/terminal_renderer.go"
 
 echo "Patching Bubble Tea renderer for xterm.js..."
-# xterm.js does not reset the cursor column on bare LF; force CSI cursor moves.
 perl -pi -e 's/mapNl := runtime\.GOOS != "windows" && p\.ttyInput == nil/mapNl := false; _ = runtime.GOOS \/\/ xterm.js: use CSI cursor moves/' "$TEA_GO"
-# Skip synchronized-output probing; xterm.js does not handle mode 2026 well.
 perl -0777 -pi -e 's/func shouldQuerySynchronizedOutput\(environ uv\.Environ\) bool \{.*?\n\}/func shouldQuerySynchronizedOutput(environ uv.Environ) bool {\n\treturn false\n}/s' "$TEA_GO"
-# Full redraw every frame; differential updates desync from xterm.js.
 perl -pi -e 's/\/\/ Clear our screen buffer before copying/s.scr.Erase() \/\/ xterm.js: avoid ghost cells\n\t\/\/ Clear our screen buffer before copying/' "$CURSED_GO"
-# Never use bare LF for vertical cursor movement (xterm keeps column).
 perl -0777 -pi -e 's/\t\t\tif !s\.flags\.Contains\(tFullscreen\) \|\| n < len\(yseq\) \{.*?\n\t\t\t\}//s' "$UV_GO"
 
 GOROOT_WASM="$(go env GOROOT)/lib/wasm/wasm_exec.js"
@@ -43,10 +40,10 @@ if [[ ! -f "$GOROOT_WASM" ]]; then
 fi
 
 echo "Copying wasm_exec.js..."
-cp "$GOROOT_WASM" web/wasm_exec.js
+cp "$GOROOT_WASM" "$WEB/wasm_exec.js"
 
 echo "Building intertui.wasm..."
-GOOS=js GOARCH=wasm go build -mod=vendor -o web/intertui.wasm ./cmd/wasm
+GOOS=js GOARCH=wasm go build -mod=vendor -o "$WEB/intertui.wasm" ./cmd/wasm
 
 echo "Cleaning up vendor..."
 rm -rf vendor
