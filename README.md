@@ -6,14 +6,6 @@ This project is unofficial and not affiliated with the game or its authors.
 
 ![intertui preview](.github/assets/preview.png)
 
-## Features
-
-- Fullscreen terminal UI with a scrollable log, input line, and status bar
-- Mouse: wheel scroll, click to copy a word, drag to select text (copied on release)
-- ANSI colors for in-game `¬` color codes
-- Tab completion for commands, subcommands, and filesystem paths
-- Session logging to `~/.intertui/logs/`
-
 ## Requirements
 
 - Go 1.25 or later
