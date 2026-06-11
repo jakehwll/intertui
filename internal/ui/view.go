@@ -82,8 +82,11 @@ func (m Model) chrome(w int) string {
 }
 
 func (m Model) footer(w int) string {
-	if m.quitConfirm {
-		return lipgloss.NewStyle().Width(w).Render(dim.Render("Press Ctrl+C again to quit!"))
+	if m.prefixArmed {
+		return lipgloss.NewStyle().Width(w).Render(dim.Render("Press D to detach"))
+	}
+	if m.detachHint {
+		return lipgloss.NewStyle().Width(w).Render(dim.Render("Press Ctrl+A, D to detach"))
 	}
 
 	status := m.statusStyle().Render("● " + m.connectionStatus())

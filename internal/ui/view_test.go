@@ -41,13 +41,13 @@ func TestFooter(t *testing.T) {
 			want: []string{"Connecting"},
 		},
 		{
-			name: "quit confirm replaces username and hides status",
+			name: "detach hint replaces username and hides status",
 			model: Model{
-				cfg:         config.Config{User: "bob"},
-				state:       stateConnected,
-				quitConfirm: true,
+				cfg:        config.Config{User: "bob"},
+				state:      stateConnected,
+				detachHint: true,
 			},
-			want: []string{"Press Ctrl+C again to quit!"},
+			want: []string{"Press Ctrl+A, D to detach"},
 			omit: []string{"Connected", "bob"},
 		},
 	}

@@ -26,12 +26,17 @@ const (
 	stateError
 )
 
-// quitConfirmWindow is how long the Ctrl+C confirmation stays armed.
-const quitConfirmWindow = 2 * time.Second
+// detachHintWindow is how long the detach hint stays visible.
+const detachHintWindow = 2 * time.Second
 
-// quitConfirmTimeoutMsg resets the quit confirmation if no second Ctrl+C
-// arrived. seq guards against stale timers clearing a re-armed confirm.
-type quitConfirmTimeoutMsg struct{ seq int }
+// detachHintTimeoutMsg clears the detach hint. seq guards against stale timers
+// clearing a re-armed hint.
+type detachHintTimeoutMsg struct{ seq int }
+
+var (
+	detachPrefixKey = key.NewBinding(key.WithKeys("ctrl+a"))
+	detachKey       = key.NewBinding(key.WithKeys("d", "ctrl+d"))
+)
 
 // Model is the Bubble Tea model for the terminal UI.
 type Model struct {
@@ -59,8 +64,9 @@ type Model struct {
 
 	historyIndex   int
 	historyDraft   string
-	quitConfirm    bool
-	quitConfirmSeq int
+	detachHint    bool
+	detachHintSeq int
+	prefixArmed   bool
 
 	completion completionState
 
@@ -176,9 +182,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyIndexedListResult(msg)
 		return m, nil
 
-	case quitConfirmTimeoutMsg:
-		if msg.seq == m.quitConfirmSeq {
-			m.quitConfirm = false
+	case detachHintTimeoutMsg:
+		if msg.seq == m.detachHintSeq {
+			m.detachHint = false
 		}
 		return m, nil
 
@@ -225,25 +231,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		m.copied = false
-		if m.quitConfirm && msg.String() != "ctrl+c" {
-			m.quitConfirm = false
-		}
-		switch msg.String() {
-		case "ctrl+c":
-			if m.quitConfirm {
+		if m.prefixArmed {
+			m.prefixArmed = false
+			if key.Matches(msg, detachKey) {
 				if m.client != nil {
 					m.client.Close()
 				}
 				return m, tea.Quit
 			}
+		}
+		if m.detachHint && msg.String() != "ctrl+c" {
+			m.detachHint = false
+		}
+		if key.Matches(msg, detachPrefixKey) {
+			m.prefixArmed = true
+			return m, nil
+		}
+		switch msg.String() {
+		case "ctrl+c":
 			if v := m.input.Value(); v != "" {
 				m.cancelInput(v)
 			}
-			m.quitConfirm = true
-			m.quitConfirmSeq++
-			seq := m.quitConfirmSeq
-			return m, tea.Tick(quitConfirmWindow, func(time.Time) tea.Msg {
-				return quitConfirmTimeoutMsg{seq: seq}
+			m.detachHint = true
+			m.detachHintSeq++
+			seq := m.detachHintSeq
+			return m, tea.Tick(detachHintWindow, func(time.Time) tea.Msg {
+				return detachHintTimeoutMsg{seq: seq}
 			})
 		case "esc":
 			if m.selecting || m.selActive {

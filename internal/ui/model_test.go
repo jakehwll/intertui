@@ -667,8 +667,8 @@ func TestCtrlCCancelsInput(t *testing.T) {
 	updated, cmd := m.Update(ctrlKey('c'))
 	model := updated.(Model)
 
-	if !model.quitConfirm {
-		t.Fatal("expected quitConfirm armed after cancelling input")
+	if !model.detachHint {
+		t.Fatal("expected detachHint armed after cancelling input")
 	}
 	if model.input.Value() != "" {
 		t.Fatalf("input = %q, want empty", model.input.Value())
@@ -681,14 +681,14 @@ func TestCtrlCCancelsInput(t *testing.T) {
 	}
 }
 
-func TestQuitConfirm(t *testing.T) {
+func TestDetachHint(t *testing.T) {
 	t.Parallel()
 
 	m := connectedModel(t)
 	updated, cmd := m.Update(ctrlKey('c'))
 	model := updated.(Model)
-	if !model.quitConfirm {
-		t.Fatal("expected quitConfirm after first ctrl+c")
+	if !model.detachHint {
+		t.Fatal("expected detachHint after first ctrl+c")
 	}
 	if cmd == nil {
 		t.Fatal("expected timeout cmd on first ctrl+c")
@@ -696,37 +696,86 @@ func TestQuitConfirm(t *testing.T) {
 
 	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a'})
 	model = updated.(Model)
-	if model.quitConfirm {
-		t.Fatal("expected quitConfirm cleared after typing")
+	if model.detachHint {
+		t.Fatal("expected detachHint cleared after typing")
 	}
 }
 
-func TestQuitConfirmTimeout(t *testing.T) {
+func TestDoubleCtrlCDoesNotQuit(t *testing.T) {
 	t.Parallel()
 
 	m := connectedModel(t)
 	updated, _ := m.Update(ctrlKey('c'))
 	m = updated.(Model)
 
-	// A stale timer (older seq) must not clear a re-armed confirm.
-	updated, _ = m.Update(quitConfirmTimeoutMsg{seq: m.quitConfirmSeq - 1})
-	m = updated.(Model)
-	if !m.quitConfirm {
-		t.Fatal("stale timeout should not clear quitConfirm")
+	updated, cmd := m.Update(ctrlKey('c'))
+	if isQuitCmd(cmd) {
+		t.Fatal("second ctrl+c should not quit")
+	}
+	model := updated.(Model)
+	if !model.detachHint {
+		t.Fatal("expected detachHint still armed after second ctrl+c")
+	}
+}
+
+func TestCtrlADetachQuits(t *testing.T) {
+	t.Parallel()
+
+	m := connectedModel(t)
+	updated, cmd := m.Update(ctrlKey('a'))
+	if cmd != nil {
+		t.Fatal("expected no cmd after ctrl+a")
+	}
+	model := updated.(Model)
+	if !model.prefixArmed {
+		t.Fatal("expected prefix armed after ctrl+a")
 	}
 
-	// The matching timer resets the confirmation.
-	updated, _ = m.Update(quitConfirmTimeoutMsg{seq: m.quitConfirmSeq})
+	updated, cmd = model.Update(tea.KeyPressMsg{Code: 'd'})
+	if !isQuitCmd(cmd) {
+		t.Fatal("expected ctrl+a, d to quit")
+	}
+}
+
+func TestCtrlADCtrlDDetachQuits(t *testing.T) {
+	t.Parallel()
+
+	m := connectedModel(t)
+	updated, _ := m.Update(ctrlKey('a'))
 	m = updated.(Model)
-	if m.quitConfirm {
-		t.Fatal("expected quitConfirm cleared after timeout")
+
+	updated, cmd := m.Update(ctrlKey('d'))
+	if !isQuitCmd(cmd) {
+		t.Fatal("expected ctrl+a, ctrl+d to quit")
+	}
+}
+
+func TestDetachHintTimeout(t *testing.T) {
+	t.Parallel()
+
+	m := connectedModel(t)
+	updated, _ := m.Update(ctrlKey('c'))
+	m = updated.(Model)
+
+	// A stale timer (older seq) must not clear a re-armed hint.
+	updated, _ = m.Update(detachHintTimeoutMsg{seq: m.detachHintSeq - 1})
+	m = updated.(Model)
+	if !m.detachHint {
+		t.Fatal("stale timeout should not clear detachHint")
 	}
 
-	// After the reset, ctrl+c arms again instead of quitting.
+	// The matching timer resets the hint.
+	updated, _ = m.Update(detachHintTimeoutMsg{seq: m.detachHintSeq})
+	m = updated.(Model)
+	if m.detachHint {
+		t.Fatal("expected detachHint cleared after timeout")
+	}
+
+	// After the reset, ctrl+c arms again.
 	updated, _ = m.Update(ctrlKey('c'))
 	m = updated.(Model)
-	if !m.quitConfirm {
-		t.Fatal("expected quitConfirm re-armed after timeout reset")
+	if !m.detachHint {
+		t.Fatal("expected detachHint re-armed after timeout reset")
 	}
 }
 
@@ -764,6 +813,14 @@ func pressKey(t *testing.T, m *Model, key tea.KeyPressMsg) {
 
 func ctrlKey(ch rune) tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: ch, Mod: tea.ModCtrl}
+}
+
+func isQuitCmd(cmd tea.Cmd) bool {
+	if cmd == nil {
+		return false
+	}
+	_, ok := cmd().(tea.QuitMsg)
+	return ok
 }
 
 func closedStringCh() <-chan string {
