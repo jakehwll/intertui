@@ -52,32 +52,6 @@ intertui --user YOU --pass SECRET
 | `INTERCEPT_USER` | `--user` |
 | `INTERCEPT_PASS` | `--pass` |
 
-### Keyboard shortcuts
-
-| Key | Action |
-|-----|--------|
-| `Enter` | Send command |
-| `Tab` | Complete command, argument, or path |
-| `↑` / `↓` | Command history |
-| `Ctrl+P` / `Ctrl+N` | Command history |
-| `PgUp` / `PgDn` | Scroll log |
-| `Ctrl+U` / `Ctrl+D` | Half-page scroll |
-| Mouse wheel / trackpad | Scroll log |
-| Click | Copy the word under the cursor |
-| Click-drag | Select log text (copies to clipboard on release) |
-| Shift+click-drag | Native terminal selection (bypasses the app) |
-| `Ctrl+Shift+C` | Copy entire log to clipboard |
-| `r` | Reconnect (after disconnect or failed login) |
-| `Ctrl+C` | Quit (press twice to confirm) |
-| `Esc` | Clear selection, or quit when nothing is selected |
-
-### Tab completion
-
-Press `Tab` to complete command names, subcommands, and filesystem paths. The first completion may query the server in the background; press `Tab` again if nothing appears right away. Ambiguous matches are listed in the log.
-
-Command names from `cmds` are cached for the session. Directory listings are cleared when you run commands that change the filesystem (`mkdir`, `rm`, and similar) or when you reconnect.
-
-If you reconnect to a different server or account, restart `intertui` to refresh the command cache.
 
 ## Configuration
 
