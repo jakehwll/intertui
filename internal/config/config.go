@@ -18,14 +18,11 @@ type Config struct {
 	Pass  string
 	Token string
 
-	Server   string
-	Port     int
-	WS       bool
-	SocketIO bool
-	TLS      bool
-	URL      string
-	Offline  bool // WASM mock mode; set via URL query, not CLI
-	Proxy    bool // WASM: Socket.IO via same-origin reverse proxy
+	Server string
+	Port   int
+	WS     bool
+	TLS    bool
+	URL    string
 }
 
 // RootCmd returns the CLI root with the default TUI command and subcommands.
@@ -123,11 +120,8 @@ func Parse() (Config, error) {
 }
 
 func (c *Config) finalize() {
-	switch {
-	case c.URL != "" && (strings.HasPrefix(c.URL, "ws://") || strings.HasPrefix(c.URL, "wss://")):
+	if c.URL != "" && (strings.HasPrefix(c.URL, "ws://") || strings.HasPrefix(c.URL, "wss://")) {
 		c.WS = true
-	case c.URL != "" && (strings.HasPrefix(c.URL, "http://") || strings.HasPrefix(c.URL, "https://")):
-		c.SocketIO = true
 	}
 }
 
@@ -138,22 +132,6 @@ func (c Config) ResolveAddr() string {
 		port = constants.DEFAULT_PORT
 	}
 	return net.JoinHostPort(c.Server, strconv.Itoa(port))
-}
-
-// ResolveSocketIOURL builds a Socket.IO URL when not overridden.
-func (c Config) ResolveSocketIOURL() string {
-	if c.URL != "" {
-		return c.URL
-	}
-	port := c.Port
-	if port == 0 {
-		port = constants.DEFAULT_SIO_PORT
-	}
-	scheme := "http"
-	if c.TLS {
-		scheme = "https"
-	}
-	return fmt.Sprintf("%s://%s", scheme, net.JoinHostPort(c.Server, strconv.Itoa(port)))
 }
 
 // ResolveURL builds a WebSocket URL when not overridden.
@@ -175,26 +153,10 @@ func (c Config) ResolveURL() string {
 
 // DialDescription returns a human-readable target for status output.
 func (c Config) DialDescription() string {
-	if c.Offline {
-		return "offline mock server"
-	}
-	if c.Proxy {
-		return "socket.io via proxy → " + c.remoteSocketIOURL()
-	}
-	if c.SocketIO || strings.HasPrefix(c.URL, "http") {
-		return c.ResolveSocketIOURL()
-	}
 	if c.WS || strings.HasPrefix(c.URL, "ws") {
 		return c.ResolveURL()
 	}
 	return "tcp://" + c.ResolveAddr()
-}
-
-func (c Config) remoteSocketIOURL() string {
-	if c.URL != "" && (strings.HasPrefix(c.URL, "http://") || strings.HasPrefix(c.URL, "https://")) {
-		return c.URL
-	}
-	return c.ResolveSocketIOURL()
 }
 
 // HasCreds reports whether flags/env provide login details.

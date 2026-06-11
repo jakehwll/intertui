@@ -34,12 +34,11 @@ type Client struct {
 	addr      string // host:port for TCP, URL for WebSocket
 	cred      Credentials
 
-	tcp        net.Conn
-	ws         *websocket.Conn
-	sioWake    chan struct{} // Socket.IO inbox wake (WASM only)
-	sioCleanup func()        // releases Socket.IO js.Func callbacks (WASM only)
-	mockIn     chan []byte
-	mockOut    chan []byte
+	tcp     net.Conn
+	ws      *websocket.Conn
+	plugin  PluginTransport
+	mockIn  chan []byte
+	mockOut chan []byte
 	ctx    context.Context
 	cancel context.CancelFunc
 
@@ -78,16 +77,6 @@ func NewTCP(addr string, cred Credentials) *Client {
 func NewWebSocket(url string, cred Credentials) *Client {
 	return &Client{
 		transport: TransportWebSocket,
-		addr:      url,
-		cred:      cred,
-		msgs:      make(chan ClientMsg, 64),
-	}
-}
-
-// NewSocketIO creates a client for Socket.IO (WASM + JS bridge).
-func NewSocketIO(url string, cred Credentials) *Client {
-	return &Client{
-		transport: TransportSocketIO,
 		addr:      url,
 		cred:      cred,
 		msgs:      make(chan ClientMsg, 64),
@@ -139,12 +128,15 @@ func (c *Client) Start(parent context.Context) error {
 		}
 		c.ws = conn
 		c.status("WebSocket connected")
-	case TransportSocketIO:
-		c.status("Opening Socket.IO to " + c.addr + "…")
-		if err := c.dialSocketIO(); err != nil {
+	case TransportPlugin:
+		if c.plugin == nil {
+			return fmt.Errorf("plugin transport not configured")
+		}
+		c.status("Opening connection to " + c.addr + "…")
+		if err := c.plugin.Dial(c.ctx, c.addr); err != nil {
 			return fmt.Errorf("dial %s: %w", c.addr, err)
 		}
-		c.status("Socket.IO connected")
+		c.status("Connected")
 	}
 
 	c.sendQ = make(chan map[string]any, 32)
@@ -215,15 +207,15 @@ func (c *Client) Close() {
 		if c.tcp != nil {
 			_ = c.tcp.Close()
 		}
-		if c.transport == TransportSocketIO {
-			c.closeSocketIO()
+		if c.plugin != nil {
+			_ = c.plugin.Close()
 		}
 		close(c.msgs)
 	})
 }
 
 func (c *Client) login() error {
-	if c.transport == TransportTCP || c.transport == TransportSocketIO || c.transport == TransportMock {
+	if c.usesTCPLogin() {
 		return c.loginTCP()
 	}
 
@@ -239,6 +231,17 @@ func (c *Client) login() error {
 		return fmt.Errorf("no credentials provided")
 	}
 	return c.selectMainSystem()
+}
+
+func (c *Client) usesTCPLogin() bool {
+	switch c.transport {
+	case TransportTCP, TransportMock:
+		return true
+	case TransportPlugin:
+		return c.plugin != nil && c.plugin.UsesTCPLogin()
+	default:
+		return false
+	}
 }
 
 // loginTCP authenticates and joins via auth → connect (token).
@@ -474,10 +477,17 @@ func (c *Client) readLoop() {
 		c.readLoopTCP()
 	case TransportMock:
 		c.readLoopMock()
-	case TransportSocketIO:
-		c.readLoopSocketIO()
+	case TransportPlugin:
+		c.readLoopPlugin()
 	default:
 		c.readLoopWS()
+	}
+}
+
+func (c *Client) readLoopPlugin() {
+	err := c.plugin.Read(c.ctx, c.handleFrame)
+	if err != nil && c.ctx.Err() == nil {
+		c.emit(DisconnectedMsg{Err: err})
 	}
 }
 
@@ -610,8 +620,8 @@ func (c *Client) writeFrame(raw []byte) error {
 		case <-c.ctx.Done():
 			return c.ctx.Err()
 		}
-	case TransportSocketIO:
-		return c.writeSocketIOFrame(raw)
+	case TransportPlugin:
+		return c.plugin.Write(raw)
 	default:
 		return wsjson.Write(c.ctx, c.ws, json.RawMessage(raw))
 	}

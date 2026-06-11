@@ -1,6 +1,6 @@
 //go:build js && wasm
 
-package config
+package browser
 
 import (
 	"fmt"
@@ -8,15 +8,22 @@ import (
 	"strconv"
 	"strings"
 	"syscall/js"
+
+	"intertui/internal/config"
 )
 
 // ParseQuery reads runtime options from the browser URL query string.
-// Defaults to offline mock when no live-connection params are present.
 func ParseQuery() (Config, error) {
 	search := js.Global().Get("window").Get("location").Get("search").String()
 	params := parseSearch(search)
 
-	cfg := Config{Offline: true, User: "offline", Pass: "offline"}
+	cfg := Config{
+		Offline: true,
+		Config: config.Config{
+			User: "offline",
+			Pass: "offline",
+		},
+	}
 
 	if v := params["offline"]; v == "0" || v == "false" {
 		cfg.Offline = false
@@ -61,7 +68,6 @@ func ParseQuery() (Config, error) {
 
 	cfg.finalize()
 
-	// Self-hosted: browser dials this origin; serve.go proxies to the game server.
 	if !cfg.Offline && cfg.SocketIO && params["url"] == "" && proxyEnabled(params) {
 		cfg.Proxy = true
 		cfg.URL = js.Global().Get("window").Get("location").Get("origin").String()

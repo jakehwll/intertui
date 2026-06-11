@@ -42,6 +42,7 @@ intertui/
     dev/           # offline mock server + TUI (not installed)
     probe/         # low-level protocol debugger
     wasm/          # browser build entrypoint
+  internal/browser/  # browser runtime (WASM-only; not compiled into desktop binary)
   web/             # browser shell, proxy, WASM build — see web/README.md
   internal/
     constants/     # DEFAULT_PORT

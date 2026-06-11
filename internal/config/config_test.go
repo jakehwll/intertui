@@ -56,9 +56,8 @@ func TestNewClientTransport(t *testing.T) {
 
 	tcp := Config{Server: "example.com"}.NewClient()
 	ws := Config{Server: "example.com", WS: true}.NewClient()
-	mock := Config{Offline: true}.NewClient()
 
-	if tcp == nil || ws == nil || mock == nil {
+	if tcp == nil || ws == nil {
 		t.Fatal("expected clients")
 	}
 }

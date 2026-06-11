@@ -5,21 +5,17 @@ package main
 import (
 	"syscall/js"
 
-	"intertui/internal/app"
-	"intertui/internal/config"
-	"intertui/internal/wasmio"
+	"intertui/internal/browser"
 )
 
 func main() {
-	wasmio.InitTerminal()
-
-	cfg, err := config.ParseQuery()
+	cfg, err := browser.ParseQuery()
 	if err != nil {
 		js.Global().Get("console").Call("error", err.Error())
 		return
 	}
 
-	if err := app.Run(cfg); err != nil {
+	if err := browser.Run(cfg); err != nil {
 		js.Global().Get("console").Call("error", "intertui:", err.Error())
 	}
 }

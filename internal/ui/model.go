@@ -40,8 +40,9 @@ var (
 
 // Model is the Bubble Tea model for the terminal UI.
 type Model struct {
-	cfg    config.Config
-	client *intercept.Client
+	cfg       config.Config
+	newClient func(config.Config) *intercept.Client
+	client    *intercept.Client
 
 	messages []string
 	history  []string
@@ -82,7 +83,7 @@ type Model struct {
 }
 
 // New returns the initial UI model.
-func New(cfg config.Config) Model {
+func New(cfg config.Config, opts ...Option) Model {
 	ti := textinput.New()
 	ti.Placeholder = "type a command..."
 	ti.CharLimit = 280
@@ -90,12 +91,19 @@ func New(cfg config.Config) Model {
 	styles.Cursor.Blink = false
 	ti.SetStyles(styles)
 
-	return Model{
+	m := Model{
 		cfg:        cfg,
 		input:      ti,
 		state:      stateConnecting,
 		completion: newCompletionState(),
 	}
+	for _, opt := range opts {
+		opt(&m)
+	}
+	if m.newClient == nil {
+		m.newClient = defaultClientFactory(cfg)
+	}
+	return m
 }
 
 func (m Model) Init() tea.Cmd {
@@ -629,5 +637,5 @@ func (m *Model) reconnect() []tea.Cmd {
 	m.input.Blur()
 	m.input.SetValue("")
 	filelog.Info("reconnect target=%s", m.cfg.DialDescription())
-	return []tea.Cmd{startClient(m.cfg)}
+	return []tea.Cmd{startClient(m.cfg, m.newClient)}
 }

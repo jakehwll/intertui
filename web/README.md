@@ -46,6 +46,7 @@ web/
   serve.go      # static files + Socket.IO proxy
   build.sh      # WASM build (patches Bubble Tea for xterm.js)
 cmd/wasm/       # WASM main
+internal/browser/  # browser-only runtime (config, Socket.IO, xterm bridge)
 ```
 
 Pushes to `main` deploy `web/` to GitHub Pages via [`.github/workflows/pages.yml`](../.github/workflows/pages.yml).

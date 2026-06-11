@@ -15,18 +15,16 @@ func Run(cfg config.Config) error {
 		defer filelog.Close()
 	}
 
-	if !cfg.Offline {
-		if !cfg.HasCreds() {
-			return fmt.Errorf("credentials required: run `intertui init`, or use --user and --pass")
-		}
-		if cfg.Server == "" && cfg.URL == "" {
-			return fmt.Errorf("server required: run `intertui init --server HOST`, or use --server / --url")
-		}
+	if !cfg.HasCreds() {
+		return fmt.Errorf("credentials required: run `intertui init`, or use --user and --pass")
+	}
+	if cfg.Server == "" && cfg.URL == "" {
+		return fmt.Errorf("server required: run `intertui init --server HOST`, or use --server / --url")
 	}
 
 	logPath, _ := filelog.Path()
-	filelog.Info("start target=%s offline=%v ws=%v sio=%v user=%s log=%s",
-		cfg.DialDescription(), cfg.Offline, cfg.WS, cfg.SocketIO, cfg.User, logPath)
+	filelog.Info("start target=%s ws=%v user=%s log=%s",
+		cfg.DialDescription(), cfg.WS, cfg.User, logPath)
 
 	p := newProgram(cfg)
 	if err := runProgram(p); err != nil {

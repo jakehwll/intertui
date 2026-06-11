@@ -9,7 +9,7 @@ type deferredStartMsg struct{}
 
 func (m Model) programInit() tea.Cmd {
 	if m.state == stateConnecting {
-		return startClient(m.cfg)
+		return startClient(m.cfg, m.newClient)
 	}
 	return nil
 }

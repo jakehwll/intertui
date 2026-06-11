@@ -21,7 +21,7 @@ func (m Model) programInit() tea.Cmd {
 func (m *Model) maybeStartClient() tea.Cmd {
 	if m.state == stateConnecting && !m.clientStarted && m.ready && m.width > 0 && m.height > 0 {
 		m.clientStarted = true
-		return startClient(m.cfg)
+		return startClient(m.cfg, m.newClient)
 	}
 	return nil
 }

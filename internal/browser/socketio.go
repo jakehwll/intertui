@@ -1,20 +1,28 @@
 //go:build js && wasm
 
-package intercept
+package browser
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"syscall/js"
 )
 
-func (c *Client) dialSocketIO() error {
+type socketIO struct {
+	wake    chan struct{}
+	cleanup func()
+}
+
+func (s *socketIO) UsesTCPLogin() bool { return true }
+
+func (s *socketIO) Dial(ctx context.Context, addr string) error {
 	net := js.Global().Get("intertuiNet")
 	if net.IsUndefined() || net.IsNull() {
 		return fmt.Errorf("intertuiNet bridge not loaded (missing socketio.js)")
 	}
 
-	c.sioWake = make(chan struct{}, 64)
+	s.wake = make(chan struct{}, 64)
 
 	errCh := make(chan string, 1)
 	connectCb := js.FuncOf(func(_ js.Value, args []js.Value) any {
@@ -27,27 +35,27 @@ func (c *Client) dialSocketIO() error {
 	})
 	defer connectCb.Release()
 
-	net.Call("connect", c.addr, connectCb)
+	net.Call("connect", addr, connectCb)
 
 	select {
 	case errMsg := <-errCh:
 		if errMsg != "" {
 			return fmt.Errorf("%s", errMsg)
 		}
-	case <-c.ctx.Done():
-		return c.ctx.Err()
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 
 	wake := js.FuncOf(func(_ js.Value, _ []js.Value) any {
 		select {
-		case c.sioWake <- struct{}{}:
+		case s.wake <- struct{}{}:
 		default:
 		}
 		return nil
 	})
 	net.Call("setWake", wake)
 
-	c.sioCleanup = func() {
+	s.cleanup = func() {
 		wake.Release()
 		net.Call("close")
 	}
@@ -55,40 +63,40 @@ func (c *Client) dialSocketIO() error {
 	return nil
 }
 
-func (c *Client) closeSocketIO() {
-	if c.sioCleanup != nil {
-		c.sioCleanup()
-		c.sioCleanup = nil
+func (s *socketIO) Close() error {
+	if s.cleanup != nil {
+		s.cleanup()
+		s.cleanup = nil
 	}
+	return nil
 }
 
-func (c *Client) readLoopSocketIO() {
-	net := js.Global().Get("intertuiNet")
-	for {
-		select {
-		case <-c.ctx.Done():
-			return
-		case <-c.sioWake:
-			for {
-				raw := net.Call("recv").String()
-				if raw == "" {
-					break
-				}
-				c.handleFrame([]byte(raw))
-			}
-			if !net.Call("connected").Bool() && c.ctx.Err() == nil {
-				c.emit(DisconnectedMsg{Err: io.EOF})
-				return
-			}
-		}
-	}
-}
-
-func (c *Client) writeSocketIOFrame(raw []byte) error {
+func (s *socketIO) Write(raw []byte) error {
 	net := js.Global().Get("intertuiNet")
 	v := net.Call("send", string(raw))
 	if v.IsNull() {
 		return nil
 	}
 	return fmt.Errorf("%s", v.String())
+}
+
+func (s *socketIO) Read(ctx context.Context, frame func([]byte)) error {
+	net := js.Global().Get("intertuiNet")
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-s.wake:
+			for {
+				raw := net.Call("recv").String()
+				if raw == "" {
+					break
+				}
+				frame([]byte(raw))
+			}
+			if !net.Call("connected").Bool() {
+				return io.EOF
+			}
+		}
+	}
 }

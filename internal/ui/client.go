@@ -21,12 +21,12 @@ type connectProgressMsg struct {
 	doneCh   <-chan clientReadyMsg
 }
 
-func startClient(cfg config.Config) tea.Cmd {
+func startClient(cfg config.Config, newClient func(config.Config) *intercept.Client) tea.Cmd {
 	statusCh := make(chan string, 32)
 	doneCh := make(chan clientReadyMsg, 1)
 
 	go func() {
-		c := cfg.NewClient()
+		c := newClient(cfg)
 		c.SetStatus(func(line string) {
 			filelog.Status(line)
 			select {

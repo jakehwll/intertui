@@ -1,6 +1,6 @@
 //go:build js && wasm
 
-package wasmio
+package browser
 
 import (
 	"io"
@@ -19,16 +19,13 @@ type xtermWriter struct {
 }
 
 func (w *xtermWriter) Write(p []byte) (n int, err error) {
-	// xterm.js does not treat bare LF as CRLF; Bubble Tea's renderer may emit
-	// \n for vertical cursor moves when mapNl is enabled.
 	s := strings.ReplaceAll(string(p), "\r\n", "\n")
 	s = strings.ReplaceAll(s, "\n", "\r\n")
 	w.term.Call("write", s)
 	return len(p), nil
 }
 
-// NewProgram creates a Bubble Tea program wired to the global xterm.js instance.
-func NewProgram(model tea.Model, options ...tea.ProgramOption) *tea.Program {
+func newProgram(model tea.Model, options ...tea.ProgramOption) *tea.Program {
 	term := js.Global().Get("term")
 	cols := term.Get("cols").Int()
 	rows := term.Get("rows").Int()
@@ -83,8 +80,7 @@ func NewProgram(model tea.Model, options ...tea.ProgramOption) *tea.Program {
 	return p
 }
 
-// Run starts the program and triggers a clean initial draw.
-func Run(p *tea.Program) error {
+func runProgram(p *tea.Program) error {
 	go func() {
 		time.Sleep(100 * time.Millisecond)
 		js.Global().Call("wasmInitialResize")
@@ -102,8 +98,7 @@ func wasmEnviron() []string {
 	}
 }
 
-// InitTerminal prepares color and environment settings for WASM rendering.
-func InitTerminal() {
+func initTerminal() {
 	for _, entry := range wasmEnviron() {
 		key, val, ok := strings.Cut(entry, "=")
 		if ok {
