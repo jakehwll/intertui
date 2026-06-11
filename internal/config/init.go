@@ -93,6 +93,16 @@ func InitCmd() *serpent.Command {
 	}
 }
 
+// ConfigExistsError is returned when config.yaml already exists and --force was not set.
+type ConfigExistsError struct {
+	Path string
+	YAML string
+}
+
+func (e *ConfigExistsError) Error() string {
+	return fmt.Sprintf("%s already exists (use --force to overwrite)", e.Path)
+}
+
 // RunInit creates ~/.intertui and writes config.yaml.
 func RunInit(opts InitOptions) (string, error) {
 	if opts.Server == "" && opts.URL == "" {
@@ -105,13 +115,30 @@ func RunInit(opts InitOptions) (string, error) {
 	}
 
 	path := filepath.Join(dir, configName)
+	content, err := marshalInitConfig(opts)
+	if err != nil {
+		return "", err
+	}
+
 	if _, err := os.Stat(path); err == nil && !opts.Force {
-		return "", fmt.Errorf("%s already exists (use --force to overwrite)", path)
+		return "", &ConfigExistsError{Path: path, YAML: content}
 	}
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	}
 
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		return "", err
+	}
+
+	return path, nil
+}
+
+func marshalInitConfig(opts InitOptions) (string, error) {
 	port := int(opts.Port)
 	if port == 0 {
 		port = constants.DEFAULT_PORT
@@ -128,21 +155,12 @@ func RunInit(opts InitOptions) (string, error) {
 		URL:    opts.URL,
 	}
 
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
-	}
-
 	byt, err := yaml.Marshal(file)
 	if err != nil {
 		return "", err
 	}
 
-	header := []byte("# intertui config — flags and env vars override these values.\n")
-	if err := os.WriteFile(path, append(header, byt...), 0o600); err != nil {
-		return "", err
-	}
-
-	return path, nil
+	return "# intertui config — flags and env vars override these values.\n" + string(byt), nil
 }
 
 type configFile struct {

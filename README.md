@@ -28,10 +28,13 @@ go build -o intertui .
 ## Usage
 
 ```bash
-# One-time setup (writes ~/.intertui/config.yaml)
+# New account (registers on server + writes ~/.intertui/config.yaml)
+intertui register --server HOST --user YOU --pass SECRET
+
+# Or one-time setup if you already have an account
 intertui init --server HOST --user YOU --pass SECRET
 
-# Start the intertui UI.
+# Start the intertui UI
 intertui
 ```
 
@@ -52,9 +55,9 @@ intertui
 
 ## Configuration
 
-Default settings live in `~/.intertui/config.yaml` (create with `intertui init`). `--user` and `--pass` override the file for a single session.
+Default settings live in `~/.intertui/config.yaml` (create with `intertui register` or `intertui init`). `--user` and `--pass` override the file for a single session.
 
-Session logs are written to `~/.intertui/logs/latest.log`. On each launch, the previous `latest.log` is renamed to a timestamped file in the same directory (for example `2025-06-10T12-34-56.log`).
+Session logs are written to `~/.intertui/logs/latest.log`.
 
 ## Development
 

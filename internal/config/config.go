@@ -105,7 +105,7 @@ func RootCmd(run func(Config) error) *serpent.Command {
 		},
 	}
 
-	root.AddSubcommands(InitCmd())
+	root.AddSubcommands(InitCmd(), RegisterCmd())
 	return root
 }
 

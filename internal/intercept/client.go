@@ -215,13 +215,7 @@ func (c *Client) loginTCP() error {
 
 	c.status("Sending auth (username/password)…")
 	auth, err := c.sendAndWait(
-		map[string]any{
-			"request": "auth",
-			"login": map[string]string{
-				"username": c.cred.User,
-				"password": c.cred.Pass,
-			},
-		},
+		authUserPassPayload("login", c.cred.User, c.cred.Pass),
 		"auth response",
 		func(e Envelope) bool { return e.Event == "auth" || e.Event == "error" },
 	)
@@ -266,13 +260,7 @@ func (c *Client) loginTCP() error {
 func (c *Client) loginUserPassWS(user, pass string) error {
 	c.status("Sending auth (username/password)…")
 	auth, err := c.sendAndWait(
-		map[string]any{
-			"request": "auth",
-			"login": map[string]string{
-				"username": user,
-				"password": pass,
-			},
-		},
+		authUserPassPayload("login", user, pass),
 		"auth response",
 		func(e Envelope) bool { return e.Event == "auth" || e.Event == "error" },
 	)
