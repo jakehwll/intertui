@@ -87,6 +87,7 @@ intertui --server HOST --user YOU --pass SECRET
 | Key | Action |
 |-----|--------|
 | `Enter` | Send command |
+| `Tab` | Complete command, argument, or path |
 | `↑` / `↓` | Command history |
 | `Ctrl+P` / `Ctrl+N` | Command history |
 | `PgUp` / `PgDn` | Scroll log |
@@ -98,6 +99,14 @@ intertui --server HOST --user YOU --pass SECRET
 | `r` | Reconnect (after disconnect or failed login) |
 | `Ctrl+C` | Quit (press twice to confirm) |
 | `Esc` | Clear selection, or quit when nothing is selected |
+
+### Tab completion
+
+Press `Tab` to complete command names, subcommands, and filesystem paths. The first completion may query the server silently in the background; press `Tab` again if nothing happens immediately. Ambiguous matches are listed in the log.
+
+The command list learned from `cmds` is cached for the rest of the session. Directory listings used for path completion are cleared when you run commands that change the filesystem (`mkdir`, `rm`, and similar) or when you reconnect.
+
+**Reconnecting:** Press `r` after a disconnect to reconnect. File-completion caches are reset, but the cached command vocabulary is kept on purpose — it reflects your account’s command set, not remote host state. If you reconnect to a **different** server or account (for example by changing flags and pressing `r`), tab completion may show stale commands until you restart `intertui`.
 
 ## Configuration
 
