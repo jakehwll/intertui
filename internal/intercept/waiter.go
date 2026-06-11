@@ -40,6 +40,20 @@ func (w *Waiter) WaitCommand(firstWord string) <-chan Envelope {
 	})
 }
 
+// Cancel removes a pending wait so an abandoned matcher (e.g. a timed-out
+// query) cannot claim a later, unrelated response.
+func (w *Waiter) Cancel(ch <-chan Envelope) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	for i, entry := range w.waits {
+		if entry.ch == ch {
+			w.waits = append(w.waits[:i], w.waits[i+1:]...)
+			return
+		}
+	}
+}
+
 // Deliver offers an event to the first matching waiter.
 func (w *Waiter) Deliver(env Envelope) bool {
 	w.mu.Lock()

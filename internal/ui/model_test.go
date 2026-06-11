@@ -222,6 +222,7 @@ func TestModelUpdateHistory(t *testing.T) {
 		actions   func(t *testing.T, m *Model)
 		wantInput string
 		wantHist  []string
+		wantInLog string
 	}{
 		{
 			name: "submit stores command history",
@@ -231,6 +232,15 @@ func TestModelUpdateHistory(t *testing.T) {
 			},
 			wantInput: "",
 			wantHist:  []string{"help", "scan"},
+		},
+		{
+			name: "submit echoes command with input prompt",
+			actions: func(t *testing.T, m *Model) {
+				submit(t, m, "ls")
+			},
+			wantInput: "",
+			wantHist:  []string{"ls"},
+			wantInLog: "> ",
 		},
 		{
 			name: "ctrl+p walks backward through history",
@@ -267,6 +277,74 @@ func TestModelUpdateHistory(t *testing.T) {
 			wantHist:  []string{"help"},
 		},
 		{
+			name: "up filters history by typed prefix",
+			actions: func(t *testing.T, m *Model) {
+				submit(t, m, "help")
+				submit(t, m, "cmds filesystem")
+				submit(t, m, "scan")
+				submit(t, m, "cmds client")
+				m.input.SetValue("cmds ")
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+			},
+			wantInput: "cmds filesystem",
+			wantHist:  []string{"help", "cmds filesystem", "scan", "cmds client"},
+		},
+		{
+			name: "down walks prefix-filtered history forward",
+			actions: func(t *testing.T, m *Model) {
+				submit(t, m, "help")
+				submit(t, m, "cmds filesystem")
+				submit(t, m, "scan")
+				submit(t, m, "cmds client")
+				m.input.SetValue("cmds ")
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+			},
+			wantInput: "cmds client",
+			wantHist:  []string{"help", "cmds filesystem", "scan", "cmds client"},
+		},
+		{
+			name: "up at oldest prefix match stays put",
+			actions: func(t *testing.T, m *Model) {
+				submit(t, m, "cmds filesystem")
+				submit(t, m, "cmds client")
+				m.input.SetValue("cmds ")
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+			},
+			wantInput: "cmds filesystem",
+			wantHist:  []string{"cmds filesystem", "cmds client"},
+		},
+		{
+			name: "down works after extra up at oldest prefix match",
+			actions: func(t *testing.T, m *Model) {
+				submit(t, m, "cmds filesystem")
+				submit(t, m, "cmds client")
+				m.input.SetValue("cmds ")
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+			},
+			wantInput: "cmds client",
+			wantHist:  []string{"cmds filesystem", "cmds client"},
+		},
+		{
+			name: "down restores prefix draft after newest match",
+			actions: func(t *testing.T, m *Model) {
+				submit(t, m, "cmds filesystem")
+				submit(t, m, "cmds client")
+				m.input.SetValue("cmds ")
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+			},
+			wantInput: "cmds ",
+			wantHist:  []string{"cmds filesystem", "cmds client"},
+		},
+		{
 			name: "duplicate submits are not stored twice",
 			actions: func(t *testing.T, m *Model) {
 				submit(t, m, "help")
@@ -294,6 +372,9 @@ func TestModelUpdateHistory(t *testing.T) {
 				if m.history[i] != want {
 					t.Fatalf("history[%d] = %q, want %q", i, m.history[i], want)
 				}
+			}
+			if tt.wantInLog != "" && !hasMessage(m.messages, tt.wantInLog) {
+				t.Fatalf("messages missing %q: %#v", tt.wantInLog, m.messages)
 			}
 		})
 	}
@@ -536,6 +617,28 @@ func TestMouseSelectionMultiline(t *testing.T) {
 
 	if got, want := m.selectionText(), "beta\ngamma"; got != want {
 		t.Fatalf("selectionText() = %q, want %q", got, want)
+	}
+}
+
+func TestCtrlCCancelsInput(t *testing.T) {
+	t.Parallel()
+
+	m := connectedModel(t)
+	m.input.SetValue("rm logs/foo")
+	updated, cmd := m.Update(ctrlKey('c'))
+	model := updated.(Model)
+
+	if !model.quitConfirm {
+		t.Fatal("expected quitConfirm armed after cancelling input")
+	}
+	if model.input.Value() != "" {
+		t.Fatalf("input = %q, want empty", model.input.Value())
+	}
+	if !hasMessage(model.messages, "> ") || !hasMessage(model.messages, "rm logs/foo ^C") {
+		t.Fatalf("cancel not logged: %#v", model.messages)
+	}
+	if cmd == nil {
+		t.Fatal("expected timeout cmd after first ctrl+c")
 	}
 }
 

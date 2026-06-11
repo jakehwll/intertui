@@ -128,6 +128,35 @@ func (c *Client) Start(parent context.Context) error {
 	return nil
 }
 
+// queryTimeout bounds silent queries; a timeout just means no result (e.g.
+// Tab completion silently does nothing).
+const queryTimeout = 3 * time.Second
+
+// Query sends a command and returns its response envelope without surfacing
+// it in the UI: the waiter claims the matching frame before handleFrame can
+// emit it as a GameLineMsg.
+func (c *Client) Query(cmd string) (Envelope, error) {
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" || c.sendQ == nil {
+		return Envelope{}, fmt.Errorf("not connected")
+	}
+
+	first, _, _ := strings.Cut(cmd, " ")
+	ch := c.waiter.WaitCommand(first)
+	c.send(map[string]any{"request": "command", "cmd": cmd})
+
+	select {
+	case env := <-ch:
+		return env, nil
+	case <-time.After(queryTimeout):
+		c.waiter.Cancel(ch)
+		return Envelope{}, fmt.Errorf("timed out waiting for %q response", first)
+	case <-c.ctx.Done():
+		c.waiter.Cancel(ch)
+		return Envelope{}, c.ctx.Err()
+	}
+}
+
 // SendCommand enqueues a game command.
 func (c *Client) SendCommand(cmd string) {
 	cmd = strings.TrimSpace(cmd)

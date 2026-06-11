@@ -60,6 +60,24 @@ type Model struct {
 	quitConfirm    bool
 	quitConfirmSeq int
 
+	// Tab-completion cache of remote directory listings, learned from
+	// silent ls probes (see complete.go).
+	completions map[completionKey][]completionEntry
+	probeSeq    int
+
+	// Tab-completion registry and vocabulary (see completion_registry.go).
+	commands     map[string]CommandSpec
+	vocab        []completionEntry
+	categories   []completionEntry
+	vocabSeq     int
+	vocabLoading bool
+
+	// Subcommand lists learned by probing parent commands (e.g. slaves).
+	subcommands     map[string][]completionEntry
+	subcommandSeq   int
+	indexedLists    map[string][]completionEntry
+	indexedListSeq  int
+
 	// In-app mouse selection (Claude Code-style): we capture the mouse, draw
 	// the highlight ourselves, and copy to the clipboard on release.
 	selecting            bool // left button held, dragging
@@ -78,7 +96,15 @@ func New(cfg config.Config) Model {
 	styles.Cursor.Blink = false
 	ti.SetStyles(styles)
 
-	m := Model{cfg: cfg, input: ti, state: stateConnecting}
+	m := Model{
+		cfg:         cfg,
+		input:       ti,
+		state:       stateConnecting,
+		completions: make(map[completionKey][]completionEntry),
+		commands:     cloneCommands(builtinCommands),
+		subcommands:   make(map[string][]completionEntry),
+		indexedLists:  make(map[string][]completionEntry),
+	}
 	if cfg.Offline && !cfg.HasCreds() {
 		m.cfg.User = "offline"
 		m.cfg.Pass = "offline"
@@ -156,6 +182,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.log(dim.Render(line))
 		}
 
+	case probeResultMsg:
+		m.applyProbeResult(msg)
+		return m, nil
+
+	case vocabResultMsg:
+		m.applyVocabResult(msg)
+		return m, nil
+
+	case subcommandResultMsg:
+		m.applySubcommandResult(msg)
+		return m, nil
+
+	case indexedListResultMsg:
+		m.applyIndexedListResult(msg)
+		return m, nil
+
 	case quitConfirmTimeoutMsg:
 		if msg.seq == m.quitConfirmSeq {
 			m.quitConfirm = false
@@ -213,6 +255,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, tea.Quit
 			}
+			if v := m.input.Value(); v != "" {
+				m.cancelInput(v)
+			}
 			m.quitConfirm = true
 			m.quitConfirmSeq++
 			seq := m.quitConfirmSeq
@@ -238,6 +283,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "down", "ctrl+n", "ctrl+down":
 			if m.state == stateConnected {
 				m.historyDown()
+				return m, tea.Batch(cmds...)
+			}
+		case "tab":
+			if m.state == stateConnected {
+				if cmd := m.completeInput(true); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 				return m, tea.Batch(cmds...)
 			}
 		case "enter":
@@ -393,15 +445,38 @@ func copyLog(messages []string) tea.Cmd {
 	return copyText(strings.Join(lines, "\n"))
 }
 
+func (m *Model) historyMatchBefore(prefix string, before int) int {
+	for i := before; i >= 0; i-- {
+		if strings.HasPrefix(m.history[i], prefix) {
+			return i
+		}
+	}
+	return -1
+}
+
+func (m *Model) historyMatchAfter(prefix string, after int) int {
+	for i := after; i < len(m.history); i++ {
+		if strings.HasPrefix(m.history[i], prefix) {
+			return i
+		}
+	}
+	return -1
+}
+
 func (m *Model) historyUp() {
 	if len(m.history) == 0 {
 		return
 	}
 	if m.historyIndex == -1 {
 		m.historyDraft = m.input.Value()
-		m.historyIndex = len(m.history) - 1
-	} else if m.historyIndex > 0 {
-		m.historyIndex--
+		m.historyIndex = m.historyMatchBefore(m.historyDraft, len(m.history)-1)
+		if m.historyIndex == -1 {
+			return
+		}
+	} else if prev := m.historyMatchBefore(m.historyDraft, m.historyIndex-1); prev >= 0 {
+		m.historyIndex = prev
+	} else {
+		return // oldest prefix match; keep index so down still works
 	}
 	m.input.SetValue(m.history[m.historyIndex])
 	m.input.CursorEnd()
@@ -411,8 +486,8 @@ func (m *Model) historyDown() {
 	if m.historyIndex == -1 {
 		return
 	}
-	if m.historyIndex < len(m.history)-1 {
-		m.historyIndex++
+	if next := m.historyMatchAfter(m.historyDraft, m.historyIndex+1); next >= 0 {
+		m.historyIndex = next
 		m.input.SetValue(m.history[m.historyIndex])
 	} else {
 		m.historyIndex = -1
@@ -421,10 +496,26 @@ func (m *Model) historyDown() {
 	m.input.CursorEnd()
 }
 
+// localEcho renders a client-side log line with the same "> " prompt as the
+// input, so local commands are visually distinct from server output.
+func (m Model) localEcho(text string) string {
+	st := m.input.Styles().Focused
+	return st.Prompt.Render(m.input.Prompt) + st.Text.Render(text)
+}
+
+func (m *Model) cancelInput(value string) {
+	m.log(m.localEcho(value + " ^C"))
+	m.historyIndex = -1
+	m.historyDraft = ""
+	m.input.SetValue("")
+	m.input.CursorEnd()
+}
+
 func (m *Model) submit(value string) {
 	if m.client != nil {
 		m.client.SendCommand(value)
 	}
+	m.invalidateCompletions(value)
 	if len(m.history) == 0 || m.history[len(m.history)-1] != value {
 		m.history = append(m.history, value)
 	}
@@ -432,7 +523,7 @@ func (m *Model) submit(value string) {
 	m.historyDraft = ""
 	m.input.SetValue("")
 	m.input.CursorEnd()
-	m.log(dim.Render("> " + value))
+	m.log(m.localEcho(value))
 }
 
 func (m *Model) reconnect() []tea.Cmd {
@@ -444,6 +535,12 @@ func (m *Model) reconnect() []tea.Cmd {
 	m.state = stateConnecting
 	m.historyIndex = -1
 	m.historyDraft = ""
+	clear(m.completions)
+	m.probeSeq++
+	// The learned vocab is kept (it's the player's command set, not host
+	// state), but any in-flight vocab probe belongs to the dead client.
+	m.vocabSeq++
+	m.vocabLoading = false
 	m.input.Blur()
 	m.input.SetValue("")
 	filelog.Info("reconnect target=%s", m.cfg.DialDescription())
