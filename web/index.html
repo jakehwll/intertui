@@ -4,95 +4,19 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="dark">
-  <meta name="theme-color" content="#000000">
   <title>intertui</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
   <style>
-    :root {
-      color-scheme: dark;
-      --bg: #000000;
-      --fg: #cccccc;
-      --scrollbar-track: #000000;
-      --scrollbar-thumb: #2a2a2a;
-      --scrollbar-thumb-hover: #3d3d3d;
-    }
-
-    * {
-      box-sizing: border-box;
-      scrollbar-width: thin;
-      scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
-    }
-
-    *::-webkit-scrollbar {
-      width: 10px;
-      height: 10px;
-    }
-
-    *::-webkit-scrollbar-track {
-      background: var(--scrollbar-track);
-    }
-
-    *::-webkit-scrollbar-thumb {
-      background: var(--scrollbar-thumb);
-      border: 2px solid var(--scrollbar-track);
-      border-radius: 6px;
-    }
-
-    *::-webkit-scrollbar-thumb:hover {
-      background: var(--scrollbar-thumb-hover);
-    }
-
-    *::-webkit-scrollbar-corner {
-      background: var(--scrollbar-track);
-    }
-
-    html, body {
-      margin: 0;
-      height: 100%;
-      overflow: hidden;
-      background: var(--bg);
-      color: var(--fg);
-    }
-
-    #terminal {
-      height: 100%;
-      width: 100%;
-    }
-
-    #terminal .xterm {
-      height: 100%;
-      padding: 0;
-    }
-
-    #terminal .xterm-viewport {
-      background-color: var(--bg) !important;
-      scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
-    }
-
-    #status {
-      display: none;
-      position: fixed;
-      inset: 0;
-      place-items: center;
-      padding: 1.5rem;
-      background: var(--bg);
-      color: #888;
-      font: 0.875rem/1.5 system-ui, sans-serif;
-      text-align: center;
-    }
-
-    #status.visible {
-      display: grid;
-    }
-
-    #status.error {
-      color: #e57373;
-    }
+    html { color-scheme: dark; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
+    body { padding: 1rem 1rem 0px; }
+    #terminal { height: 100%; }
+    * { box-sizing: border-box; }
+    * { scrollbar-width: thin; scrollbar-color: #333 #000; }
   </style>
 </head>
 <body>
   <div id="terminal"></div>
-  <div id="status" class="visible">Loading…</div>
 
   <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
@@ -100,57 +24,29 @@
   <script src="./socketio.js"></script>
   <script src="./wasm_exec.js"></script>
   <script>
-    const status = document.getElementById("status");
+    const fit = new FitAddon.FitAddon();
+    const term = new Terminal({
+      cursorBlink: true,
+      convertEol: true,
+      fontSize: 14,
+      fontFamily: "Menlo, Monaco, 'Courier New', monospace",
+      theme: { background: "#000", foreground: "#ccc" },
+    });
+    term.loadAddon(fit);
+    term.open(document.getElementById("terminal"));
+    fit.fit();
+    term.focus();
+    window.addEventListener("resize", () => fit.fit());
 
-    function showStatus(msg, isError) {
-      status.textContent = msg;
-      status.classList.add("visible");
-      status.classList.toggle("error", !!isError);
-    }
-
-    function hideStatus() {
-      status.classList.remove("visible", "error");
-    }
-
-    async function init() {
-      const term = new Terminal({
-        cursorBlink: true,
-        convertEol: true,
-        fontSize: 14,
-        fontFamily: "Menlo, Monaco, 'Courier New', monospace",
-        theme: {
-          background: "#000000",
-          foreground: "#cccccc",
-          cursor: "#cccccc",
-          selectionBackground: "#3d3d3d",
-        },
-      });
-      const fitAddon = new FitAddon.FitAddon();
-      term.loadAddon(fitAddon);
-      term.open(document.getElementById("terminal"));
-      fitAddon.fit();
-      term.focus();
-
-      window.addEventListener("resize", () => fitAddon.fit());
-
-      await new Promise((resolve) => requestAnimationFrame(resolve));
-      fitAddon.fit();
-
+    requestAnimationFrame(() => {
+      fit.fit();
       globalThis.term = term;
       term.clear();
 
       const go = new Go();
-      const result = await WebAssembly.instantiateStreaming(
-        fetch("./intertui.wasm"),
-        go.importObject
-      );
-      hideStatus();
-      go.run(result.instance);
-    }
-
-    init().catch((err) => {
-      showStatus("Failed to load: " + err, true);
-      console.error(err);
+      WebAssembly.instantiateStreaming(fetch("./intertui.wasm"), go.importObject)
+        .then((r) => go.run(r.instance))
+        .catch((err) => console.error(err));
     });
   </script>
 </body>
