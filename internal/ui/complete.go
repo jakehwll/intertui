@@ -87,8 +87,6 @@ func parseListing(msg string) map[string][]completionEntry {
 	return out
 }
 
-// parseNameList parses one-name-per-line cmds output, skipping blank lines
-// and headers like "Categories:".
 // parseSubcommandSection extracts subcommand names under a header. Lines may
 // be bare ("list"), prefixed ("bits balance"), or flag docs ("-a, …") which
 // are skipped.
@@ -159,6 +157,8 @@ func parseIndexedList(msg, sectionHeader string) []string {
 	return indices
 }
 
+// parseNameList parses one-name-per-line cmds output, skipping blank lines
+// and headers like "Categories:".
 func parseNameList(msg string) []string {
 	var names []string
 	for _, line := range strings.Split(intercept.Clean(msg), "\n") {
