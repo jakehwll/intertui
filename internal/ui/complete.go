@@ -59,6 +59,47 @@ type vocabResultMsg struct {
 	err        error
 }
 
+// completionState holds tab-completion caches, the command registry, and
+// probe sequence numbers.
+type completionState struct {
+	completions map[completionKey][]completionEntry
+	probeSeq    int
+
+	commands     map[string]CommandSpec
+	vocab        []completionEntry
+	categories   []completionEntry
+	vocabSeq     int
+	vocabLoading bool
+
+	subcommands    map[string][]completionEntry
+	subcommandSeq  int
+	indexedLists   map[string][]completionEntry
+	indexedListSeq int
+}
+
+func newCompletionState() completionState {
+	return completionState{
+		completions:  make(map[completionKey][]completionEntry),
+		commands:     cloneCommands(builtinCommands),
+		subcommands:  make(map[string][]completionEntry),
+		indexedLists: make(map[string][]completionEntry),
+	}
+}
+
+// onReconnect clears path caches and cancels in-flight vocab probes while
+// keeping the learned command vocabulary.
+func (c *completionState) onReconnect() {
+	clear(c.completions)
+	c.probeSeq++
+	c.vocabSeq++
+	c.vocabLoading = false
+}
+
+func (c *completionState) invalidatePathCaches() {
+	clear(c.completions)
+	c.probeSeq++
+}
+
 // parseListing parses ls output into per-directory entries. Unindented
 // "name/" lines open a directory whose indented children follow, so a single
 // listing can populate several directories.
@@ -330,13 +371,13 @@ func (m *Model) completeInput(allowProbe bool) tea.Cmd {
 		return m.completeVocab(t, allowProbe)
 	}
 
-	arg, ok := t.argSpec(m.commands)
+	arg, ok := t.argSpec(m.completion.commands)
 	if !ok {
 		return nil
 	}
 	switch arg.Kind {
 	case ArgCategories:
-		return m.completeEntries(t, m.categories, allowProbe)
+		return m.completeEntries(t, m.completion.categories, allowProbe)
 	case ArgSubcommand:
 		return m.completeSubcommand(t, arg.Section, allowProbe)
 	case ArgIndexedList:
@@ -360,25 +401,25 @@ func commandEntries(commands map[string]CommandSpec) []completionEntry {
 }
 
 func (m *Model) completeVocab(t inputTarget, allowProbe bool) tea.Cmd {
-	if m.vocab == nil {
+	if m.completion.vocab == nil {
 		if cmd := m.startVocabProbe(allowProbe); cmd != nil {
 			return cmd
 		}
-		m.completeAgainst("", t.partial, t.wordSuffix, t.suffix, commandEntries(m.commands), " ", PathDefault)
+		m.completeAgainst("", t.partial, t.wordSuffix, t.suffix, commandEntries(m.completion.commands), " ", PathDefault)
 		return nil
 	}
-	m.completeAgainst("", t.partial, t.wordSuffix, t.suffix, m.vocab, " ", PathDefault)
+	m.completeAgainst("", t.partial, t.wordSuffix, t.suffix, m.completion.vocab, " ", PathDefault)
 	return nil
 }
 
 func (m *Model) completeIndexedList(t inputTarget, arg ArgSpec, allowProbe bool) tea.Cmd {
-	entries, ok := m.indexedLists[arg.Probe]
+	entries, ok := m.completion.indexedLists[arg.Probe]
 	if !ok {
 		if !allowProbe || m.client == nil {
 			return nil
 		}
-		m.indexedListSeq++
-		return probeIndexedList(m.client, arg.Probe, arg.Section, m.indexedListSeq)
+		m.completion.indexedListSeq++
+		return probeIndexedList(m.client, arg.Probe, arg.Section, m.completion.indexedListSeq)
 	}
 	// Empty partial: fill the lowest index (e.g. "software uninstall " → "… 0").
 	if t.partial == "" && len(entries) > 0 {
@@ -396,13 +437,13 @@ func (m *Model) completeIndexedList(t inputTarget, arg ArgSpec, allowProbe bool)
 }
 
 func (m *Model) completeSubcommand(t inputTarget, section string, allowProbe bool) tea.Cmd {
-	entries, ok := m.subcommands[t.cmd]
+	entries, ok := m.completion.subcommands[t.cmd]
 	if !ok {
 		if !allowProbe || m.client == nil {
 			return nil
 		}
-		m.subcommandSeq++
-		return probeSubcommand(m.client, t.cmd, section, m.subcommandSeq)
+		m.completion.subcommandSeq++
+		return probeSubcommand(m.client, t.cmd, section, m.completion.subcommandSeq)
 	}
 	m.completeAgainst(t.prefix, t.partial, t.wordSuffix, t.suffix, entries, "", PathDefault)
 	return nil
@@ -421,13 +462,13 @@ func (m *Model) completePath(t inputTarget, style PathStyle, allowProbe bool) te
 	if !ok {
 		return nil
 	}
-	entries, cached := m.completions[pt.cacheKey()]
+	entries, cached := m.completion.completions[pt.cacheKey()]
 	if !cached {
 		if !allowProbe || m.client == nil {
 			return nil
 		}
-		m.probeSeq++
-		return probeListing(m.client, pt.cacheKey(), m.probeSeq)
+		m.completion.probeSeq++
+		return probeListing(m.client, pt.cacheKey(), m.completion.probeSeq)
 	}
 	m.completeAgainst(pt.tokenPrefix(), pt.partial, t.wordSuffix, t.suffix, entries, "", style)
 	return nil
@@ -481,16 +522,16 @@ func (m *Model) logProbeError(err error) {
 }
 
 func (m *Model) applyIndexedListResult(msg indexedListResultMsg) {
-	if msg.seq != m.indexedListSeq {
+	if msg.seq != m.completion.indexedListSeq {
 		return
 	}
 	if msg.err != nil {
 		m.logProbeError(msg.err)
 		return
 	}
-	m.indexedLists[msg.probe] = toEntries(msg.indices)
+	m.completion.indexedLists[msg.probe] = toEntries(msg.indices)
 	if len(msg.indices) == 0 {
-		m.indexedLists[msg.probe] = nil
+		m.completion.indexedLists[msg.probe] = nil
 	}
 	m.completeInput(false)
 }
@@ -508,17 +549,17 @@ func probeSubcommand(client *intercept.Client, cmd, section string, seq int) tea
 }
 
 func (m *Model) applySubcommandResult(msg subcommandResultMsg) {
-	if msg.seq != m.subcommandSeq {
+	if msg.seq != m.completion.subcommandSeq {
 		return
 	}
 	if msg.err != nil {
 		m.logProbeError(msg.err)
 		return
 	}
-	m.subcommands[msg.cmd] = toEntries(msg.names)
+	m.completion.subcommands[msg.cmd] = toEntries(msg.names)
 	// Remember probed-but-empty so Tab doesn't re-probe in a loop.
 	if len(msg.names) == 0 {
-		m.subcommands[msg.cmd] = nil
+		m.completion.subcommands[msg.cmd] = nil
 	}
 	m.completeInput(false)
 }
@@ -535,12 +576,12 @@ func probeListing(client *intercept.Client, key completionKey, seq int) tea.Cmd 
 }
 
 func (m *Model) startVocabProbe(allowProbe bool) tea.Cmd {
-	if !allowProbe || m.vocabLoading || m.client == nil {
+	if !allowProbe || m.completion.vocabLoading || m.client == nil {
 		return nil
 	}
-	m.vocabSeq++
-	m.vocabLoading = true
-	return probeVocab(m.client, m.vocabSeq)
+	m.completion.vocabSeq++
+	m.completion.vocabLoading = true
+	return probeVocab(m.client, m.completion.vocabSeq)
 }
 
 func probeVocab(client *intercept.Client, seq int) tea.Cmd {
@@ -567,26 +608,26 @@ func probeVocab(client *intercept.Client, seq int) tea.Cmd {
 }
 
 func (m *Model) applyVocabResult(msg vocabResultMsg) {
-	if msg.seq != m.vocabSeq {
+	if msg.seq != m.completion.vocabSeq {
 		return
 	}
-	m.vocabLoading = false
+	m.completion.vocabLoading = false
 	if msg.err != nil {
 		m.logProbeError(msg.err)
 		return
 	}
-	m.categories = toEntries(msg.categories)
-	m.vocab = toEntries(msg.commands)
+	m.completion.categories = toEntries(msg.categories)
+	m.completion.vocab = toEntries(msg.commands)
 	for _, name := range msg.filesystem {
 		if spec, ok := specFromFilesystem(name); ok {
-			m.commands[name] = spec
+			m.completion.commands[name] = spec
 		}
 	}
 	m.completeInput(false)
 }
 
 func (m *Model) applyProbeResult(msg probeResultMsg) {
-	if msg.seq != m.probeSeq {
+	if msg.seq != m.completion.probeSeq {
 		return
 	}
 	if msg.err != nil {
@@ -594,10 +635,10 @@ func (m *Model) applyProbeResult(msg probeResultMsg) {
 		return
 	}
 	for dir, entries := range parseListing(msg.listing) {
-		m.completions[completionKey{dir: dir, local: msg.key.local}] = entries
+		m.completion.completions[completionKey{dir: dir, local: msg.key.local}] = entries
 	}
-	if _, ok := m.completions[msg.key]; !ok {
-		m.completions[msg.key] = nil
+	if _, ok := m.completion.completions[msg.key]; !ok {
+		m.completion.completions[msg.key] = nil
 	}
 	m.completeInput(false)
 }
@@ -608,25 +649,23 @@ func (m *Model) invalidateCompletions(value string) {
 	case len(fields) >= 2 && fields[0] == "software":
 		switch fields[1] {
 		case "install", "uninstall", "transfer", "destroy":
-			delete(m.indexedLists, "software list")
-			m.indexedListSeq++
+			delete(m.completion.indexedLists, "software list")
+			m.completion.indexedListSeq++
 		}
 	case len(fields) >= 2 && fields[0] == "jobs" && fields[1] == "kill":
-		delete(m.indexedLists, "jobs list")
-		m.indexedListSeq++
+		delete(m.completion.indexedLists, "jobs list")
+		m.completion.indexedListSeq++
 	}
 
 	if len(fields) == 0 {
 		return
 	}
 	cmd := fields[0]
-	if spec, ok := m.commands[cmd]; ok && spec.InvalidateFS {
-		clear(m.completions)
-		m.probeSeq++
+	if spec, ok := m.completion.commands[cmd]; ok && spec.InvalidateFS {
+		m.completion.invalidatePathCaches()
 		return
 	}
 	if cmd == "connect" {
-		clear(m.completions)
-		m.probeSeq++
+		m.completion.invalidatePathCaches()
 	}
 }

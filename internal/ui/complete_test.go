@@ -349,7 +349,7 @@ func TestRmRmdirCompletion(t *testing.T) {
 
 	listing := "logs/\n\txfer.log\nfoo/ (empty)"
 	m := connectedModel(t)
-	m.completions[completionKey{}] = parseListing(listing)[""]
+	m.completion.completions[completionKey{}] = parseListing(listing)[""]
 
 	t.Run("rm traverses into non-empty dir", func(t *testing.T) {
 		setInput(t, &m, "rm lo")
@@ -389,7 +389,7 @@ func TestTabCompletionFlow(t *testing.T) {
 
 	m := connectedModel(t)
 	setInput(t, &m, "cat l")
-	m.probeSeq = 1
+	m.completion.probeSeq = 1
 
 	// The probe reply both populates the cache and applies the completion.
 	updated, _ := m.Update(probeResultMsg{seq: 1, key: completionKey{}, listing: wireListing})
@@ -426,7 +426,7 @@ func TestProbeErrorLogged(t *testing.T) {
 		t.Parallel()
 
 		m := connectedModel(t)
-		m.probeSeq = 1
+		m.completion.probeSeq = 1
 		updated, _ := m.Update(probeResultMsg{seq: 1, key: completionKey{}, err: err})
 		m = updated.(Model)
 		if !hasMessage(m.messages, "tab completion") {
@@ -438,7 +438,7 @@ func TestProbeErrorLogged(t *testing.T) {
 		t.Parallel()
 
 		m := connectedModel(t)
-		m.probeSeq = 2
+		m.completion.probeSeq = 2
 		updated, _ := m.Update(probeResultMsg{seq: 1, key: completionKey{}, err: err})
 		m = updated.(Model)
 		if hasMessage(m.messages, "tab completion") {
@@ -450,11 +450,11 @@ func TestProbeErrorLogged(t *testing.T) {
 		t.Parallel()
 
 		m := connectedModel(t)
-		m.vocabSeq = 1
-		m.vocabLoading = true
+		m.completion.vocabSeq = 1
+		m.completion.vocabLoading = true
 		updated, _ := m.Update(vocabResultMsg{seq: 1, err: err})
 		m = updated.(Model)
-		if m.vocabLoading {
+		if m.completion.vocabLoading {
 			t.Fatal("vocabLoading not cleared after error")
 		}
 		if !hasMessage(m.messages, "tab completion") {
@@ -468,15 +468,15 @@ func TestStaleProbeResultDropped(t *testing.T) {
 
 	m := connectedModel(t)
 	setInput(t, &m, "cat l")
-	m.probeSeq = 2
+	m.completion.probeSeq = 2
 
 	updated, _ := m.Update(probeResultMsg{seq: 1, key: completionKey{}, listing: wireListing})
 	m = updated.(Model)
 	if got := m.input.Value(); got != "cat l" {
 		t.Fatalf("input = %q, want unchanged %q", got, "cat l")
 	}
-	if len(m.completions) != 0 {
-		t.Fatalf("stale probe populated cache: %#v", m.completions)
+	if len(m.completion.completions) != 0 {
+		t.Fatalf("stale probe populated cache: %#v", m.completion.completions)
 	}
 }
 
@@ -484,7 +484,7 @@ func TestAmbiguousCompletionListsCandidates(t *testing.T) {
 	t.Parallel()
 
 	m := connectedModel(t)
-	m.completions[completionKey{}] = []completionEntry{
+	m.completion.completions[completionKey{}] = []completionEntry{
 		{name: "readme.txt"},
 		{name: "reports", isDir: true},
 	}
@@ -574,8 +574,8 @@ func TestJobsCompletion(t *testing.T) {
 	}
 
 	m := connectedModel(t)
-	m.subcommands["jobs"] = toEntries(got)
-	m.indexedLists["jobs list"] = toEntries(parseIndexedList(wireJobsList, "Jobs:"))
+	m.completion.subcommands["jobs"] = toEntries(got)
+	m.completion.indexedLists["jobs list"] = toEntries(parseIndexedList(wireJobsList, "Jobs:"))
 
 	setInput(t, &m, "jobs k")
 	pressKey(t, &m, tea.KeyPressMsg{Code: tea.KeyTab})
@@ -594,7 +594,7 @@ func TestHardwareSubcommandCompletion(t *testing.T) {
 	t.Parallel()
 
 	m := connectedModel(t)
-	m.subcommands["hardware"] = toEntries(parseSubcommandSection(wireHardwareHelp, "Commands:", "hardware"))
+	m.completion.subcommands["hardware"] = toEntries(parseSubcommandSection(wireHardwareHelp, "Commands:", "hardware"))
 	setInput(t, &m, "hardware upgrade_r")
 	pressKey(t, &m, tea.KeyPressMsg{Code: tea.KeyTab})
 	if got := m.input.Value(); got != "hardware upgrade_ram" {
@@ -606,7 +606,7 @@ func TestBitsSubcommandCompletion(t *testing.T) {
 	t.Parallel()
 
 	m := connectedModel(t)
-	m.subcommands["bits"] = toEntries([]string{"balance", "transfer"})
+	m.completion.subcommands["bits"] = toEntries([]string{"balance", "transfer"})
 	setInput(t, &m, "bits tran")
 	pressKey(t, &m, tea.KeyPressMsg{Code: tea.KeyTab})
 	if got := m.input.Value(); got != "bits transfer" {
@@ -627,8 +627,8 @@ func TestSoftwareCompletion(t *testing.T) {
 	t.Parallel()
 
 	m := connectedModel(t)
-	m.subcommands["software"] = toEntries(parseSubcommandSection(wireSoftwareHelp, "Commands:", "software"))
-	m.indexedLists["software list"] = toEntries([]string{"0", "1", "2"})
+	m.completion.subcommands["software"] = toEntries(parseSubcommandSection(wireSoftwareHelp, "Commands:", "software"))
+	m.completion.indexedLists["software list"] = toEntries([]string{"0", "1", "2"})
 
 	t.Run("subcommand", func(t *testing.T) {
 		setInput(t, &m, "software unin")
@@ -659,7 +659,7 @@ func TestTabCompletesWordAtCursor(t *testing.T) {
 	t.Parallel()
 
 	m := vocabModel(t)
-	m.subcommands["software"] = toEntries(parseSubcommandSection(wireSoftwareHelp, "Commands:", "software"))
+	m.completion.subcommands["software"] = toEntries(parseSubcommandSection(wireSoftwareHelp, "Commands:", "software"))
 	setInput(t, &m, "software install 1")
 	m.input.SetCursor(len("software inst"))
 	pressKey(t, &m, tea.KeyPressMsg{Code: tea.KeyTab})
@@ -672,7 +672,7 @@ func TestSlavesSubcommandCompletion(t *testing.T) {
 	t.Parallel()
 
 	m := connectedModel(t)
-	m.subcommandSeq = 1
+	m.completion.subcommandSeq = 1
 	updated, _ := m.Update(subcommandResultMsg{
 		seq:   1,
 		cmd:   "slaves",
@@ -722,7 +722,7 @@ func vocabModel(t *testing.T) Model {
 	t.Helper()
 
 	m := connectedModel(t)
-	m.vocabSeq = 1
+	m.completion.vocabSeq = 1
 	updated, _ := m.Update(vocabResultMsg{
 		seq:        1,
 		categories: []string{"client", "filesystem"},
@@ -749,7 +749,7 @@ func TestEmptyInputTabListsCommands(t *testing.T) {
 		t.Parallel()
 
 		m := connectedModel(t)
-		m.vocabLoading = true
+		m.completion.vocabLoading = true
 		pressKey(t, &m, tea.KeyPressMsg{Code: tea.KeyTab})
 		if !hasMessage(m.messages, "cat") || !hasMessage(m.messages, "cmds") {
 			t.Fatalf("builtin commands not listed: %#v", m.messages)
@@ -809,7 +809,7 @@ func TestVocabExtendsCommandRegistry(t *testing.T) {
 	t.Parallel()
 
 	m := connectedModel(t)
-	m.vocabSeq = 1
+	m.completion.vocabSeq = 1
 	updated, _ := m.Update(vocabResultMsg{
 		seq:        1,
 		categories: []string{"filesystem"},
@@ -818,10 +818,10 @@ func TestVocabExtendsCommandRegistry(t *testing.T) {
 	})
 	m = updated.(Model)
 
-	if spec, ok := m.commands["shred"]; !ok || spec.Args[0].Kind != ArgPath {
+	if spec, ok := m.completion.commands["shred"]; !ok || spec.Args[0].Kind != ArgPath {
 		t.Fatal("filesystem category command not registered for path completion")
 	}
-	if spec, ok := m.commands["cat"]; !ok || spec.Args[0].Kind != ArgPath {
+	if spec, ok := m.completion.commands["cat"]; !ok || spec.Args[0].Kind != ArgPath {
 		t.Fatal("builtin path command lost after vocab merge")
 	}
 }
@@ -830,15 +830,15 @@ func TestStaleVocabResultDropped(t *testing.T) {
 	t.Parallel()
 
 	m := connectedModel(t)
-	m.vocabSeq = 2
-	m.vocabLoading = true
+	m.completion.vocabSeq = 2
+	m.completion.vocabLoading = true
 	updated, _ := m.Update(vocabResultMsg{seq: 1, commands: []string{"cat"}})
 	m = updated.(Model)
 
-	if m.vocab != nil {
-		t.Fatalf("stale vocab applied: %#v", m.vocab)
+	if m.completion.vocab != nil {
+		t.Fatalf("stale vocab applied: %#v", m.completion.vocab)
 	}
-	if !m.vocabLoading {
+	if !m.completion.vocabLoading {
 		t.Fatal("stale result must not clear the in-flight flag")
 	}
 }
@@ -847,7 +847,7 @@ func TestVocabProbeNotDuplicated(t *testing.T) {
 	t.Parallel()
 
 	m := connectedModel(t)
-	m.vocabLoading = true
+	m.completion.vocabLoading = true
 	setInput(t, &m, "mkd")
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
@@ -879,10 +879,10 @@ func TestSubmitInvalidatesCompletions(t *testing.T) {
 			t.Parallel()
 
 			m := connectedModel(t)
-			m.completions[completionKey{}] = []completionEntry{{name: "logs", isDir: true}}
+			m.completion.completions[completionKey{}] = []completionEntry{{name: "logs", isDir: true}}
 			submit(t, &m, tt.command)
 
-			if empty := len(m.completions) == 0; empty != tt.wantEmpty {
+			if empty := len(m.completion.completions) == 0; empty != tt.wantEmpty {
 				t.Fatalf("cache empty = %v, want %v after %q", empty, tt.wantEmpty, tt.command)
 			}
 		})

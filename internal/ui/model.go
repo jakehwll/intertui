@@ -60,23 +60,7 @@ type Model struct {
 	quitConfirm    bool
 	quitConfirmSeq int
 
-	// Tab-completion cache of remote directory listings, learned from
-	// silent ls probes (see complete.go).
-	completions map[completionKey][]completionEntry
-	probeSeq    int
-
-	// Tab-completion registry and vocabulary (see completion_registry.go).
-	commands     map[string]CommandSpec
-	vocab        []completionEntry
-	categories   []completionEntry
-	vocabSeq     int
-	vocabLoading bool
-
-	// Subcommand lists learned by probing parent commands (e.g. slaves).
-	subcommands     map[string][]completionEntry
-	subcommandSeq   int
-	indexedLists    map[string][]completionEntry
-	indexedListSeq  int
+	completion completionState
 
 	// In-app mouse selection (Claude Code-style): we capture the mouse, draw
 	// the highlight ourselves, and copy to the clipboard on release.
@@ -97,13 +81,10 @@ func New(cfg config.Config) Model {
 	ti.SetStyles(styles)
 
 	m := Model{
-		cfg:         cfg,
-		input:       ti,
-		state:       stateConnecting,
-		completions: make(map[completionKey][]completionEntry),
-		commands:     cloneCommands(builtinCommands),
-		subcommands:   make(map[string][]completionEntry),
-		indexedLists:  make(map[string][]completionEntry),
+		cfg:        cfg,
+		input:      ti,
+		state:      stateConnecting,
+		completion: newCompletionState(),
 	}
 	if cfg.Offline && !cfg.HasCreds() {
 		m.cfg.User = "offline"
@@ -535,12 +516,7 @@ func (m *Model) reconnect() []tea.Cmd {
 	m.state = stateConnecting
 	m.historyIndex = -1
 	m.historyDraft = ""
-	clear(m.completions)
-	m.probeSeq++
-	// The learned vocab is kept (it's the player's command set, not host
-	// state), but any in-flight vocab probe belongs to the dead client.
-	m.vocabSeq++
-	m.vocabLoading = false
+	m.completion.onReconnect()
 	m.input.Blur()
 	m.input.SetValue("")
 	filelog.Info("reconnect target=%s", m.cfg.DialDescription())
