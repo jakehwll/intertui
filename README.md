@@ -31,11 +31,8 @@ go build -o intertui .
 # One-time setup (writes ~/.intertui/config.yaml)
 intertui init --server HOST --user YOU --pass SECRET
 
-# Connect using config file
+# Start the intertui UI.
 intertui
-
-# Override credentials for this session
-intertui --user YOU --pass SECRET
 ```
 
 ### Flags
