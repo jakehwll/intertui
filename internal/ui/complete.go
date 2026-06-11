@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
@@ -176,6 +177,11 @@ func toEntries(names []string) []completionEntry {
 		entries[i] = completionEntry{name: name}
 	}
 	return entries
+}
+
+func dedupeSorted(ss []string) []string {
+	sort.Strings(ss)
+	return slices.Compact(ss)
 }
 
 func indentDepth(line string) int {
@@ -530,7 +536,7 @@ func probeVocab(client *intercept.Client, seq int) tea.Cmd {
 				msg.filesystem = names
 			}
 		}
-		sort.Strings(msg.commands)
+		msg.commands = dedupeSorted(msg.commands)
 		return msg
 	}
 }

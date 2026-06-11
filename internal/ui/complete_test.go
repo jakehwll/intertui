@@ -15,6 +15,16 @@ const (
 	wireFsCmds     = "¬gcat¬*\n¬gls¬*\n¬gmkdir¬*\n¬grm¬*\n¬grmdir¬*"
 )
 
+func TestDedupeSorted(t *testing.T) {
+	t.Parallel()
+
+	got := dedupeSorted([]string{"rm", "cat", "ls", "cat", "rm", "mkdir"})
+	want := []string{"cat", "ls", "mkdir", "rm"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("dedupeSorted = %#v, want %#v", got, want)
+	}
+}
+
 func TestParseListing(t *testing.T) {
 	t.Parallel()
 
