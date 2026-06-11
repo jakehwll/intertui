@@ -93,6 +93,7 @@ intertui --server HOST --user YOU --pass SECRET
 | `PgUp` / `PgDn` | Scroll log |
 | `Ctrl+U` / `Ctrl+D` | Half-page scroll |
 | Mouse wheel / trackpad | Scroll log |
+| Click | Copy the word under the cursor |
 | Click-drag | Select log text (copies to clipboard on release) |
 | Shift+click-drag | Native terminal selection (bypasses the app) |
 | `Ctrl+Shift+C` | Copy entire log to clipboard |

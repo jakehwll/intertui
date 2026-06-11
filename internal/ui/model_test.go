@@ -460,6 +460,45 @@ func TestModelUpdateReconnect(t *testing.T) {
 	}
 }
 
+func TestMouseClickWordCopy(t *testing.T) {
+	t.Parallel()
+
+	m := connectedModel(t)
+	updated, _ := m.Update(intercept.GameLineMsg{Line: "scanning 1.2.3.4:13373 done"})
+	m = updated.(Model)
+
+	// Click on the IP without dragging.
+	updated, _ = m.Update(tea.MouseClickMsg{X: 9, Y: 0, Button: tea.MouseLeft})
+	m = updated.(Model)
+	updated, cmd := m.Update(tea.MouseReleaseMsg{X: 9, Y: 0, Button: tea.MouseLeft})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected copy cmd on word click")
+	}
+	if got := m.selectionText(); got != "1.2.3.4:13373" {
+		t.Fatalf("selectionText() = %q, want %q", got, "1.2.3.4:13373")
+	}
+	if !m.copied {
+		t.Fatal("expected copied flag after word click")
+	}
+}
+
+func TestWordBoundsAt(t *testing.T) {
+	t.Parallel()
+
+	line := "target 1.2.3.4 ready"
+	from, to := wordBoundsAt(line, strings.Index(line, "1"))
+	if got := line[from : to+1]; got != "1.2.3.4" {
+		t.Fatalf("wordBoundsAt() = %q, want %q", got, "1.2.3.4")
+	}
+
+	// Whitespace click snaps to the nearest word.
+	from, to = wordBoundsAt(line, strings.Index(line, " "))
+	if got := line[from : to+1]; got != "target" {
+		t.Fatalf("nearest word = %q, want %q", got, "target")
+	}
+}
+
 func TestMouseSelection(t *testing.T) {
 	t.Parallel()
 

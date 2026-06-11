@@ -3,6 +3,8 @@ package ui
 import (
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
@@ -213,6 +215,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseReleaseMsg:
 		if m.selecting {
 			m.selecting = false
+			if !m.selActive {
+				m.expandSelectionToWord()
+			}
 			if m.selActive {
 				if text := m.selectionText(); text != "" {
 					m.copied = true
@@ -380,6 +385,95 @@ func (m Model) selectionText() string {
 		out = append(out, strings.TrimRight(seg, " "))
 	}
 	return strings.Join(out, "\n")
+}
+
+func isWordChar(r rune) bool {
+	if unicode.IsLetter(r) || unicode.IsDigit(r) {
+		return true
+	}
+	switch r {
+	case '.', ':', '/', '-', '_', '@', '#':
+		return true
+	default:
+		return false
+	}
+}
+
+func wordCharAt(line string, col int) bool {
+	if col < 0 || col >= ansi.StringWidth(line) {
+		return false
+	}
+	ch := ansi.Strip(ansi.Cut(line, col, col+1))
+	if ch == "" {
+		return false
+	}
+	r, _ := utf8.DecodeRuneInString(ch)
+	return isWordChar(r)
+}
+
+// wordSpans returns [from, to) display-column spans for each word on a line.
+func wordSpans(line string) [][2]int {
+	width := ansi.StringWidth(line)
+	var spans [][2]int
+	for col := 0; col < width; {
+		if !wordCharAt(line, col) {
+			col++
+			continue
+		}
+		from := col
+		for col < width && wordCharAt(line, col) {
+			col++
+		}
+		spans = append(spans, [2]int{from, col})
+	}
+	return spans
+}
+
+func wordBoundsAt(line string, col int) (from, to int) {
+	spans := wordSpans(line)
+	if len(spans) == 0 {
+		return col, col
+	}
+	width := ansi.StringWidth(line)
+	col = max(0, min(col, width-1))
+
+	for _, sp := range spans {
+		if col >= sp[0] && col < sp[1] {
+			return sp[0], sp[1] - 1
+		}
+	}
+
+	best := spans[0]
+	bestDist := wordSpanDistance(col, best)
+	for _, sp := range spans[1:] {
+		if d := wordSpanDistance(col, sp); d < bestDist {
+			best, bestDist = sp, d
+		}
+	}
+	return best[0], best[1] - 1
+}
+
+func wordSpanDistance(col int, span [2]int) int {
+	if col < span[0] {
+		return span[0] - col
+	}
+	if col >= span[1] {
+		return col - span[1] + 1
+	}
+	return 0
+}
+
+func (m *Model) expandSelectionToWord() {
+	if m.selStartY < 0 || m.selStartY >= len(m.displayLines) {
+		return
+	}
+	from, to := wordBoundsAt(m.displayLines[m.selStartY], m.selStartX)
+	if from > to {
+		return
+	}
+	m.selStartX, m.selEndX = from, to
+	m.selEndY = m.selStartY
+	m.selActive = true
 }
 
 func (m *Model) clearSelection() {
