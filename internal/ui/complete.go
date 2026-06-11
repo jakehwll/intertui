@@ -457,12 +457,11 @@ func filesOnly(entries []completionEntry) []completionEntry {
 func probeIndexedList(client *intercept.Client, probe, section string, seq int) tea.Cmd {
 	return func() tea.Msg {
 		env, err := client.Query(probe)
-		return indexedListResultMsg{
-			seq:     seq,
-			probe:   probe,
-			indices: parseIndexedList(env.Msg, section),
-			err:     err,
+		msg := indexedListResultMsg{seq: seq, probe: probe, err: err}
+		if err == nil {
+			msg.indices = parseIndexedList(env.Msg, section)
 		}
+		return msg
 	}
 }
 
@@ -480,13 +479,12 @@ func (m *Model) applyIndexedListResult(msg indexedListResultMsg) {
 func probeSubcommand(client *intercept.Client, cmd, section string, seq int) tea.Cmd {
 	return func() tea.Msg {
 		env, err := client.Query(cmd)
-		return subcommandResultMsg{
-			seq:     seq,
-			cmd:     cmd,
-			listing: env.Msg,
-			names:   parseSubcommandSection(env.Msg, section, cmd),
-			err:     err,
+		msg := subcommandResultMsg{seq: seq, cmd: cmd, err: err}
+		if err == nil {
+			msg.listing = env.Msg
+			msg.names = parseSubcommandSection(env.Msg, section, cmd)
 		}
+		return msg
 	}
 }
 
@@ -505,7 +503,11 @@ func (m *Model) applySubcommandResult(msg subcommandResultMsg) {
 func probeListing(client *intercept.Client, key completionKey, seq int) tea.Cmd {
 	return func() tea.Msg {
 		env, err := client.Query(lsQuery(key))
-		return probeResultMsg{seq: seq, key: key, listing: env.Msg, err: err}
+		msg := probeResultMsg{seq: seq, key: key, err: err}
+		if err == nil {
+			msg.listing = env.Msg
+		}
+		return msg
 	}
 }
 
