@@ -25,7 +25,8 @@ func Run(cfg config.Config) error {
 	}
 
 	logPath, _ := filelog.Path()
-	filelog.Info("start target=%s offline=%v ws=%v user=%s log=%s", cfg.DialDescription(), cfg.Offline, cfg.WS, cfg.User, logPath)
+	filelog.Info("start target=%s offline=%v ws=%v sio=%v user=%s log=%s",
+		cfg.DialDescription(), cfg.Offline, cfg.WS, cfg.SocketIO, cfg.User, logPath)
 
 	p := newProgram(cfg)
 	if err := runProgram(p); err != nil {

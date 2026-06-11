@@ -18,12 +18,14 @@ type Config struct {
 	Pass  string
 	Token string
 
-	Server  string
-	Port    int
-	WS      bool
-	TLS     bool
-	URL     string
-	Offline bool // WASM mock mode; set via URL query, not CLI
+	Server   string
+	Port     int
+	WS       bool
+	SocketIO bool
+	TLS      bool
+	URL      string
+	Offline  bool // WASM mock mode; set via URL query, not CLI
+	Proxy    bool // WASM: Socket.IO via same-origin reverse proxy
 }
 
 // RootCmd returns the CLI root with the default TUI command and subcommands.
@@ -121,8 +123,11 @@ func Parse() (Config, error) {
 }
 
 func (c *Config) finalize() {
-	if c.URL != "" && (strings.HasPrefix(c.URL, "ws://") || strings.HasPrefix(c.URL, "wss://")) {
+	switch {
+	case c.URL != "" && (strings.HasPrefix(c.URL, "ws://") || strings.HasPrefix(c.URL, "wss://")):
 		c.WS = true
+	case c.URL != "" && (strings.HasPrefix(c.URL, "http://") || strings.HasPrefix(c.URL, "https://")):
+		c.SocketIO = true
 	}
 }
 
@@ -133,6 +138,22 @@ func (c Config) ResolveAddr() string {
 		port = constants.DEFAULT_PORT
 	}
 	return net.JoinHostPort(c.Server, strconv.Itoa(port))
+}
+
+// ResolveSocketIOURL builds a Socket.IO URL when not overridden.
+func (c Config) ResolveSocketIOURL() string {
+	if c.URL != "" {
+		return c.URL
+	}
+	port := c.Port
+	if port == 0 {
+		port = constants.DEFAULT_SIO_PORT
+	}
+	scheme := "http"
+	if c.TLS {
+		scheme = "https"
+	}
+	return fmt.Sprintf("%s://%s", scheme, net.JoinHostPort(c.Server, strconv.Itoa(port)))
 }
 
 // ResolveURL builds a WebSocket URL when not overridden.
@@ -157,21 +178,23 @@ func (c Config) DialDescription() string {
 	if c.Offline {
 		return "offline mock server"
 	}
+	if c.Proxy {
+		return "socket.io via proxy → " + c.remoteSocketIOURL()
+	}
+	if c.SocketIO || strings.HasPrefix(c.URL, "http") {
+		return c.ResolveSocketIOURL()
+	}
 	if c.WS || strings.HasPrefix(c.URL, "ws") {
 		return c.ResolveURL()
 	}
 	return "tcp://" + c.ResolveAddr()
 }
 
-// NewClient builds an intercept client from config.
-func (c Config) NewClient() *intercept.Client {
-	if c.Offline {
-		return intercept.NewMock(c.Credentials())
+func (c Config) remoteSocketIOURL() string {
+	if c.URL != "" && (strings.HasPrefix(c.URL, "http://") || strings.HasPrefix(c.URL, "https://")) {
+		return c.URL
 	}
-	if c.WS {
-		return intercept.NewWebSocket(c.ResolveURL(), c.Credentials())
-	}
-	return intercept.NewTCP(c.ResolveAddr(), c.Credentials())
+	return c.ResolveSocketIOURL()
 }
 
 // HasCreds reports whether flags/env provide login details.

@@ -59,35 +59,32 @@ Default settings live in `~/.intertui/config.yaml` (create with `intertui regist
 
 Session logs are written to `~/.intertui/logs/latest.log`.
 
-## Web (GitHub Pages)
+## Web client (self-hosted)
 
-The browser build runs the same Bubble Tea TUI in WASM with [xterm.js](https://xtermjs.org/) as the terminal.
+The same TUI runs in the browser via WebAssembly and [xterm.js](https://xtermjs.org/). Live play uses **Socket.IO** (port **13370**) proxied through your web server so the browser never needs CORS access to the game host.
 
 ```bash
 ./scripts/build-wasm.sh
 go run ./web/serve.go
-# open http://localhost:8080
+# open http://localhost:8080/?server=GAME_HOST&user=YOU&pass=SECRET
 ```
 
-Pushes to `main` deploy `web/` to GitHub Pages via [`.github/workflows/pages.yml`](.github/workflows/pages.yml). Enable **Pages → Source: GitHub Actions** in the repo settings once.
-
-### URL parameters
-
-| Param | Description |
-|-------|-------------|
+| Query param | Description |
+|-------------|-------------|
 | *(none)* | Offline mock (default) |
-| `offline=0` | Require live connection params |
-| `ws=1` | Use WebSocket transport |
-| `server` | Game server host |
-| `port` | Server port (default `13373`) |
-| `user` / `pass` | Login credentials |
-| `token` | API token (WebSocket) |
-| `tls=1` | Use `wss://` |
-| `url` | Full WebSocket URL (overrides `server` / `port`) |
+| `server` | Game host (required for live play) |
+| `user`, `pass` | Credentials (or `token`) |
+| `port` | Socket.IO port (default `13370`) |
+| `tls=1` | Use `https://` to reach the game server |
+| `direct=1` | Skip proxy; browser connects to game host directly (needs CORS on the server) |
+| `ws=1` | Plain WebSocket instead of Socket.IO |
+| `url` | Full Socket.IO or WebSocket URL override |
 
-Example live play: `?ws=1&server=example.com&user=YOU&pass=SECRET`
+Pin the upstream without URL params: `INTERTUI_PROXY=http://game:13370 go run ./web/serve.go`
 
-TCP is not available in the browser. Live WebSocket may fail if the game server blocks cross-origin browser connections.
+Put Caddy or nginx in front of `serve.go` for TLS in production. Avoid putting passwords in query strings on shared links — use a config file or auth in front of the reverse proxy.
+
+Pushes to `main` can also deploy `web/` to GitHub Pages via [`.github/workflows/pages.yml`](.github/workflows/pages.yml).
 
 ## Development
 

@@ -34,10 +34,12 @@ type Client struct {
 	addr      string // host:port for TCP, URL for WebSocket
 	cred      Credentials
 
-	tcp    net.Conn
-	ws     *websocket.Conn
-	mockIn  chan []byte
-	mockOut chan []byte
+	tcp        net.Conn
+	ws         *websocket.Conn
+	sioWake    chan struct{} // Socket.IO inbox wake (WASM only)
+	sioCleanup func()        // releases Socket.IO js.Func callbacks (WASM only)
+	mockIn     chan []byte
+	mockOut    chan []byte
 	ctx    context.Context
 	cancel context.CancelFunc
 
@@ -76,6 +78,16 @@ func NewTCP(addr string, cred Credentials) *Client {
 func NewWebSocket(url string, cred Credentials) *Client {
 	return &Client{
 		transport: TransportWebSocket,
+		addr:      url,
+		cred:      cred,
+		msgs:      make(chan ClientMsg, 64),
+	}
+}
+
+// NewSocketIO creates a client for Socket.IO (WASM + JS bridge).
+func NewSocketIO(url string, cred Credentials) *Client {
+	return &Client{
+		transport: TransportSocketIO,
 		addr:      url,
 		cred:      cred,
 		msgs:      make(chan ClientMsg, 64),
@@ -127,6 +139,12 @@ func (c *Client) Start(parent context.Context) error {
 		}
 		c.ws = conn
 		c.status("WebSocket connected")
+	case TransportSocketIO:
+		c.status("Opening Socket.IO to " + c.addr + "…")
+		if err := c.dialSocketIO(); err != nil {
+			return fmt.Errorf("dial %s: %w", c.addr, err)
+		}
+		c.status("Socket.IO connected")
 	}
 
 	c.sendQ = make(chan map[string]any, 32)
@@ -197,12 +215,15 @@ func (c *Client) Close() {
 		if c.tcp != nil {
 			_ = c.tcp.Close()
 		}
+		if c.transport == TransportSocketIO {
+			c.closeSocketIO()
+		}
 		close(c.msgs)
 	})
 }
 
 func (c *Client) login() error {
-	if c.transport == TransportTCP {
+	if c.transport == TransportTCP || c.transport == TransportSocketIO || c.transport == TransportMock {
 		return c.loginTCP()
 	}
 
@@ -453,6 +474,8 @@ func (c *Client) readLoop() {
 		c.readLoopTCP()
 	case TransportMock:
 		c.readLoopMock()
+	case TransportSocketIO:
+		c.readLoopSocketIO()
 	default:
 		c.readLoopWS()
 	}
@@ -587,6 +610,8 @@ func (c *Client) writeFrame(raw []byte) error {
 		case <-c.ctx.Done():
 			return c.ctx.Err()
 		}
+	case TransportSocketIO:
+		return c.writeSocketIOFrame(raw)
 	default:
 		return wsjson.Write(c.ctx, c.ws, json.RawMessage(raw))
 	}

@@ -8,6 +8,8 @@ const (
 	TransportTCP Transport = iota
 	// TransportWebSocket uses JSON frames over WebSocket.
 	TransportWebSocket
+	// TransportSocketIO uses Socket.IO (browser WASM via JS bridge).
+	TransportSocketIO
 	// TransportMock uses an in-process mock backend (no network).
 	TransportMock
 )

@@ -4,6 +4,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"syscall/js"
@@ -15,13 +16,14 @@ func ParseQuery() (Config, error) {
 	search := js.Global().Get("window").Get("location").Get("search").String()
 	params := parseSearch(search)
 
-	cfg := Config{Offline: true}
+	cfg := Config{Offline: true, User: "offline", Pass: "offline"}
 
 	if v := params["offline"]; v == "0" || v == "false" {
 		cfg.Offline = false
 	}
 	if v := params["ws"]; v == "1" || v == "true" {
 		cfg.WS = true
+		cfg.SocketIO = false
 		cfg.Offline = false
 	}
 	if v := params["tls"]; v == "1" || v == "true" {
@@ -49,17 +51,28 @@ func ParseQuery() (Config, error) {
 	if v := params["url"]; v != "" {
 		cfg.URL = v
 	}
+
+	if cfg.Server != "" || cfg.URL != "" {
+		cfg.Offline = false
+	}
+	if !cfg.Offline && !cfg.WS {
+		cfg.SocketIO = true
+	}
+
 	cfg.finalize()
+
+	// Self-hosted: browser dials this origin; serve.go proxies to the game server.
+	if !cfg.Offline && cfg.SocketIO && params["url"] == "" && proxyEnabled(params) {
+		cfg.Proxy = true
+		cfg.URL = js.Global().Get("window").Get("location").Get("origin").String()
+	}
 
 	if !cfg.Offline {
 		if !cfg.HasCreds() {
 			return Config{}, fmt.Errorf("credentials required: add ?user=...&pass=... or ?token=...")
 		}
-		if !cfg.WS && cfg.Server == "" && cfg.URL == "" {
-			return Config{}, fmt.Errorf("server required: add ?ws=1&server=HOST (TCP is unavailable in the browser)")
-		}
-		if !cfg.WS {
-			return Config{}, fmt.Errorf("TCP is unavailable in the browser; add ?ws=1")
+		if cfg.Server == "" && cfg.URL == "" {
+			return Config{}, fmt.Errorf("server required: add ?server=HOST")
 		}
 	}
 
@@ -81,7 +94,16 @@ func parseSearch(search string) map[string]string {
 			out[key] = ""
 			continue
 		}
-		out[key] = val
+		decoded, err := url.QueryUnescape(val)
+		if err != nil {
+			out[key] = val
+			continue
+		}
+		out[key] = decoded
 	}
 	return out
+}
+
+func proxyEnabled(params map[string]string) bool {
+	return params["direct"] != "1" && params["direct"] != "true"
 }
