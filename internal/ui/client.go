@@ -7,6 +7,7 @@ import (
 
 	"intertui/internal/config"
 	"intertui/internal/intercept"
+	filelog "intertui/internal/log"
 )
 
 type clientReadyMsg struct {
@@ -16,7 +17,6 @@ type clientReadyMsg struct {
 }
 
 type connectProgressMsg struct {
-	line     string
 	statusCh <-chan string
 	doneCh   <-chan clientReadyMsg
 }
@@ -28,6 +28,7 @@ func startClient(cfg config.Config) tea.Cmd {
 	go func() {
 		c := cfg.NewClient()
 		c.SetStatus(func(line string) {
+			filelog.Status(line)
 			select {
 			case statusCh <- line:
 			default:
@@ -54,8 +55,8 @@ func pollConnect(statusCh <-chan string, doneCh <-chan clientReadyMsg) tea.Cmd {
 			if !ok {
 				return <-doneCh
 			}
+			_ = line
 			return connectProgressMsg{
-				line:     line,
 				statusCh: statusCh,
 				doneCh:   doneCh,
 			}

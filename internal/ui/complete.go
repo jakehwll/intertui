@@ -1,0 +1,660 @@
+package ui
+
+import (
+	"slices"
+	"sort"
+	"strings"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
+
+	"intertui/internal/intercept"
+)
+
+// completionKey identifies one cached directory listing. local distinguishes
+// the player's own system (-l/--local flag) from the connected host.
+type completionKey struct {
+	dir   string
+	local bool
+}
+
+type completionEntry struct {
+	name    string
+	isDir   bool
+	isEmpty bool // directory with no children ("name/ (empty)" in ls output)
+}
+
+// probeResultMsg carries the response of a silent ls probe.
+type probeResultMsg struct {
+	seq     int
+	key     completionKey
+	listing string
+	err     error
+}
+
+// indexedListResultMsg carries indices parsed from a numbered list probe.
+type indexedListResultMsg struct {
+	seq    int
+	probe  string
+	indices []string
+	err    error
+}
+
+// subcommandResultMsg carries subcommands parsed from probing a parent command.
+type subcommandResultMsg struct {
+	seq     int
+	cmd     string
+	listing string
+	names   []string
+	err     error
+}
+
+// vocabResultMsg carries the command vocabulary learned from a cmds probe
+// chain: categories, all commands, and filesystem-category commands.
+type vocabResultMsg struct {
+	seq        int
+	categories []string
+	commands   []string
+	filesystem []string
+	err        error
+}
+
+// completionState holds tab-completion caches, the command registry, and
+// probe sequence numbers.
+type completionState struct {
+	completions map[completionKey][]completionEntry
+	probeSeq    int
+
+	commands     map[string]CommandSpec
+	vocab        []completionEntry
+	categories   []completionEntry
+	vocabSeq     int
+	vocabLoading bool
+
+	subcommands    map[string][]completionEntry
+	subcommandSeq  int
+	indexedLists   map[string][]completionEntry
+	indexedListSeq int
+}
+
+func newCompletionState() completionState {
+	return completionState{
+		completions:  make(map[completionKey][]completionEntry),
+		commands:     cloneCommands(builtinCommands),
+		subcommands:  make(map[string][]completionEntry),
+		indexedLists: make(map[string][]completionEntry),
+	}
+}
+
+// onReconnect clears path caches and cancels in-flight vocab probes while
+// keeping the learned command vocabulary.
+func (c *completionState) onReconnect() {
+	clear(c.completions)
+	c.probeSeq++
+	c.vocabSeq++
+	c.vocabLoading = false
+}
+
+func (c *completionState) invalidatePathCaches() {
+	clear(c.completions)
+	c.probeSeq++
+}
+
+// parseListing parses ls output into per-directory entries. Unindented
+// "name/" lines open a directory whose indented children follow, so a single
+// listing can populate several directories.
+func parseListing(msg string) map[string][]completionEntry {
+	out := make(map[string][]completionEntry)
+	var stack []string
+	for _, line := range strings.Split(intercept.Clean(msg), "\n") {
+		name := strings.TrimSpace(line)
+		if name == "" {
+			continue
+		}
+		depth := min(indentDepth(line), len(stack))
+		stack = stack[:depth]
+
+		isEmpty := strings.HasSuffix(name, " (empty)")
+		if isEmpty {
+			name = strings.TrimSuffix(name, " (empty)")
+		}
+		dir := strings.Join(stack, "/")
+		isDir := strings.HasSuffix(name, "/")
+		name = strings.TrimSuffix(name, "/")
+		out[dir] = append(out[dir], completionEntry{name: name, isDir: isDir, isEmpty: isEmpty})
+		if isDir {
+			stack = append(stack, name)
+		}
+	}
+	return out
+}
+
+// parseSubcommandSection extracts subcommand names under a header. Lines may
+// be bare ("list"), prefixed ("bits balance"), or flag docs ("-a, …") which
+// are skipped.
+func parseSubcommandSection(msg, sectionHeader, cmd string) []string {
+	var names []string
+	seen := make(map[string]bool)
+	inSection := false
+	for _, line := range strings.Split(intercept.Clean(msg), "\n") {
+		name := strings.TrimSpace(line)
+		if name == "" {
+			continue
+		}
+		if strings.HasPrefix(name, sectionHeader) {
+			inSection = true
+			continue
+		}
+		if !inSection {
+			continue
+		}
+		if strings.HasPrefix(name, "-") {
+			continue
+		}
+		if strings.HasSuffix(name, ":") && !strings.Contains(name, " ") {
+			break
+		}
+
+		var sub string
+		if cmd != "" && strings.HasPrefix(name, cmd+" ") {
+			rest := strings.TrimSpace(strings.TrimPrefix(name, cmd+" "))
+			sub, _, _ = strings.Cut(rest, " ")
+		} else {
+			sub, _, _ = strings.Cut(name, " ")
+		}
+		if sub == "" || seen[sub] {
+			continue
+		}
+		seen[sub] = true
+		names = append(names, sub)
+	}
+	return names
+}
+
+// parseIndexedList extracts index tokens from lines like "0: atom_probe (probe)"
+// under a section header (e.g. "Software:").
+func parseIndexedList(msg, sectionHeader string) []string {
+	var indices []string
+	inSection := false
+	for _, line := range strings.Split(intercept.Clean(msg), "\n") {
+		name := strings.TrimSpace(line)
+		if name == "" {
+			continue
+		}
+		if strings.HasPrefix(name, sectionHeader) {
+			inSection = true
+			continue
+		}
+		if !inSection {
+			continue
+		}
+		before, _, ok := strings.Cut(name, ":")
+		if !ok {
+			continue
+		}
+		if idx := strings.TrimSpace(before); idx != "" {
+			indices = append(indices, idx)
+		}
+	}
+	return indices
+}
+
+// parseNameList parses one-name-per-line cmds output, skipping blank lines
+// and headers like "Categories:".
+func parseNameList(msg string) []string {
+	var names []string
+	for _, line := range strings.Split(intercept.Clean(msg), "\n") {
+		name := strings.TrimSpace(line)
+		if name == "" || strings.HasSuffix(name, ":") {
+			continue
+		}
+		names = append(names, name)
+	}
+	return names
+}
+
+func toEntries(names []string) []completionEntry {
+	entries := make([]completionEntry, len(names))
+	for i, name := range names {
+		entries[i] = completionEntry{name: name}
+	}
+	return entries
+}
+
+func dedupeSorted(ss []string) []string {
+	sort.Strings(ss)
+	return slices.Compact(ss)
+}
+
+func indentDepth(line string) int {
+	tabs, i := 0, 0
+	for ; i < len(line) && (line[i] == '\t' || line[i] == ' '); i++ {
+		if line[i] == '\t' {
+			tabs++
+		}
+	}
+	if tabs == 0 && i > 0 {
+		return 1
+	}
+	return tabs
+}
+
+func filterEntries(entries []completionEntry, style PathStyle) []completionEntry {
+	switch style {
+	case PathRm:
+		out := make([]completionEntry, 0, len(entries))
+		for _, e := range entries {
+			if !e.isEmpty {
+				out = append(out, e)
+			}
+		}
+		return out
+	case PathDirsOnly:
+		out := make([]completionEntry, 0, len(entries))
+		for _, e := range entries {
+			if e.isDir {
+				out = append(out, e)
+			}
+		}
+		return out
+	default:
+		return entries
+	}
+}
+
+// completeToken matches partial against entries, returning the replacement
+// fill and the matching entries.
+func completeToken(entries []completionEntry, partial string, style PathStyle) (string, []completionEntry) {
+	entries = filterEntries(entries, style)
+	var matches []completionEntry
+	for _, e := range entries {
+		if strings.HasPrefix(e.name, partial) {
+			matches = append(matches, e)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return "", nil
+	case 1:
+		if matches[0].isDir && style != PathDirsOnly {
+			return matches[0].name + "/", matches
+		}
+		return matches[0].name, matches
+	}
+	fill := matches[0].name
+	for _, e := range matches[1:] {
+		fill = commonPrefix(fill, e.name)
+	}
+	return fill, matches
+}
+
+func commonPrefix(a, b string) string {
+	ar, br := []rune(a), []rune(b)
+	n := min(len(ar), len(br))
+	i := 0
+	for i < n && ar[i] == br[i] {
+		i++
+	}
+	return string(ar[:i])
+}
+
+func candidateColumns(matches []completionEntry, width int) string {
+	names := make([]string, len(matches))
+	for i, e := range matches {
+		names[i] = e.name
+		if e.isDir {
+			names[i] += "/"
+		}
+	}
+	sort.Strings(names)
+	if len(names) == 0 {
+		return ""
+	}
+	if width <= 0 {
+		width = 80
+	}
+
+	maxWidth := 0
+	for _, name := range names {
+		maxWidth = max(maxWidth, ansi.StringWidth(name))
+	}
+	const gap = 2
+	colWidth := maxWidth + gap
+	ncol := max(1, width/colWidth)
+	if ncol > len(names) {
+		ncol = len(names)
+	}
+	nrow := (len(names) + ncol - 1) / ncol
+
+	var rows []string
+	for r := 0; r < nrow; r++ {
+		var parts []string
+		for c := 0; c < ncol; c++ {
+			idx := r*ncol + c
+			if idx >= len(names) {
+				break
+			}
+			name := names[idx]
+			pad := maxWidth - ansi.StringWidth(name)
+			parts = append(parts, name+strings.Repeat(" ", pad))
+		}
+		rows = append(rows, strings.Join(parts, strings.Repeat(" ", gap)))
+	}
+	return strings.Join(rows, "\n")
+}
+
+func lsQuery(key completionKey) string {
+	parts := []string{"ls"}
+	if key.local {
+		parts = append(parts, "-l")
+	}
+	if key.dir != "" {
+		parts = append(parts, key.dir)
+	}
+	return strings.Join(parts, " ")
+}
+
+// completeInput routes Tab completion through the command registry: argument
+// position 0 uses the vocabulary probe; each declared ArgSpec handles its
+// argument kind.
+func (m *Model) completeInput(allowProbe bool) tea.Cmd {
+	line := m.input.Value()
+	cursor := m.input.Position()
+	if cursor > len(line) {
+		cursor = len(line)
+	}
+	t, ok := parseInputTarget(line, cursor)
+	if !ok {
+		return nil
+	}
+	if t.argPos == 0 {
+		return m.completeVocab(t, allowProbe)
+	}
+
+	arg, ok := t.argSpec(m.completion.commands)
+	if !ok {
+		return nil
+	}
+	switch arg.Kind {
+	case ArgCategories:
+		return m.completeEntries(t, m.completion.categories, allowProbe)
+	case ArgSubcommand:
+		return m.completeSubcommand(t, arg.Section, allowProbe)
+	case ArgIndexedList:
+		return m.completeIndexedList(t, arg, allowProbe)
+	case ArgChoices:
+		m.completeAgainst(t.prefix, t.partial, t.wordSuffix, t.suffix, toEntries(arg.Choices), "", PathDefault)
+		return nil
+	case ArgPath:
+		return m.completePath(t, arg.Path, allowProbe)
+	}
+	return nil
+}
+
+func commandEntries(commands map[string]CommandSpec) []completionEntry {
+	names := make([]string, 0, len(commands))
+	for name := range commands {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return toEntries(names)
+}
+
+func (m *Model) completeVocab(t inputTarget, allowProbe bool) tea.Cmd {
+	if m.completion.vocab == nil {
+		if cmd := m.startVocabProbe(allowProbe); cmd != nil {
+			return cmd
+		}
+		m.completeAgainst("", t.partial, t.wordSuffix, t.suffix, commandEntries(m.completion.commands), " ", PathDefault)
+		return nil
+	}
+	m.completeAgainst("", t.partial, t.wordSuffix, t.suffix, m.completion.vocab, " ", PathDefault)
+	return nil
+}
+
+func (m *Model) completeIndexedList(t inputTarget, arg ArgSpec, allowProbe bool) tea.Cmd {
+	entries, ok := m.completion.indexedLists[arg.Probe]
+	if !ok {
+		if !allowProbe || m.client == nil {
+			return nil
+		}
+		m.completion.indexedListSeq++
+		return probeIndexedList(m.client, arg.Probe, arg.Section, m.completion.indexedListSeq)
+	}
+	m.completeAgainst(t.prefix, t.partial, t.wordSuffix, t.suffix, entries, "", PathDefault)
+	return nil
+}
+
+func (m *Model) completeSubcommand(t inputTarget, section string, allowProbe bool) tea.Cmd {
+	entries, ok := m.completion.subcommands[t.cmd]
+	if !ok {
+		if !allowProbe || m.client == nil {
+			return nil
+		}
+		m.completion.subcommandSeq++
+		return probeSubcommand(m.client, t.cmd, section, m.completion.subcommandSeq)
+	}
+	m.completeAgainst(t.prefix, t.partial, t.wordSuffix, t.suffix, entries, "", PathDefault)
+	return nil
+}
+
+func (m *Model) completeEntries(t inputTarget, entries []completionEntry, allowProbe bool) tea.Cmd {
+	if entries == nil {
+		return m.startVocabProbe(allowProbe)
+	}
+	m.completeAgainst(t.prefix, t.partial, t.wordSuffix, t.suffix, entries, "", PathDefault)
+	return nil
+}
+
+func (m *Model) completePath(t inputTarget, style PathStyle, allowProbe bool) tea.Cmd {
+	pt, ok := pathTargetFrom(t, style)
+	if !ok {
+		return nil
+	}
+	entries, cached := m.completion.completions[pt.cacheKey()]
+	if !cached {
+		if !allowProbe || m.client == nil {
+			return nil
+		}
+		m.completion.probeSeq++
+		return probeListing(m.client, pt.cacheKey(), m.completion.probeSeq)
+	}
+	m.completeAgainst(pt.tokenPrefix(), pt.partial, t.wordSuffix, t.suffix, entries, "", style)
+	return nil
+}
+
+func (m *Model) completeAgainst(prefix, partial, wordSuffix, suffix string, entries []completionEntry, uniqueSuffix string, style PathStyle) {
+	fill, matches := completeToken(entries, partial, style)
+	switch {
+	case len(matches) == 0:
+	case len(matches) == 1:
+		m.input.SetValue(prefix + fill + uniqueSuffix + suffix)
+		m.input.CursorEnd()
+	case fill != partial:
+		m.input.SetValue(prefix + fill + wordSuffix + suffix)
+		m.input.CursorEnd()
+	default:
+		display := matches
+		if style == PathRm {
+			display = filesOnly(matches)
+		}
+		m.log(dim.Render(candidateColumns(display, m.width)))
+	}
+}
+
+func filesOnly(entries []completionEntry) []completionEntry {
+	out := make([]completionEntry, 0, len(entries))
+	for _, e := range entries {
+		if !e.isDir {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func probeIndexedList(client *intercept.Client, probe, section string, seq int) tea.Cmd {
+	return func() tea.Msg {
+		env, err := client.Query(probe)
+		msg := indexedListResultMsg{seq: seq, probe: probe, err: err}
+		if err == nil {
+			msg.indices = parseIndexedList(env.Msg, section)
+		}
+		return msg
+	}
+}
+
+func (m *Model) logProbeError(err error) {
+	if err == nil {
+		return
+	}
+	m.log(dim.Render("tab completion: " + err.Error()))
+}
+
+func (m *Model) applyIndexedListResult(msg indexedListResultMsg) {
+	if msg.seq != m.completion.indexedListSeq {
+		return
+	}
+	if msg.err != nil {
+		m.logProbeError(msg.err)
+		return
+	}
+	m.completion.indexedLists[msg.probe] = toEntries(msg.indices)
+	if len(msg.indices) == 0 {
+		m.completion.indexedLists[msg.probe] = nil
+	}
+	m.completeInput(false)
+}
+
+func probeSubcommand(client *intercept.Client, cmd, section string, seq int) tea.Cmd {
+	return func() tea.Msg {
+		env, err := client.Query(cmd)
+		msg := subcommandResultMsg{seq: seq, cmd: cmd, err: err}
+		if err == nil {
+			msg.listing = env.Msg
+			msg.names = parseSubcommandSection(env.Msg, section, cmd)
+		}
+		return msg
+	}
+}
+
+func (m *Model) applySubcommandResult(msg subcommandResultMsg) {
+	if msg.seq != m.completion.subcommandSeq {
+		return
+	}
+	if msg.err != nil {
+		m.logProbeError(msg.err)
+		return
+	}
+	m.completion.subcommands[msg.cmd] = toEntries(msg.names)
+	// Remember probed-but-empty so Tab doesn't re-probe in a loop.
+	if len(msg.names) == 0 {
+		m.completion.subcommands[msg.cmd] = nil
+	}
+	m.completeInput(false)
+}
+
+func probeListing(client *intercept.Client, key completionKey, seq int) tea.Cmd {
+	return func() tea.Msg {
+		env, err := client.Query(lsQuery(key))
+		msg := probeResultMsg{seq: seq, key: key, err: err}
+		if err == nil {
+			msg.listing = env.Msg
+		}
+		return msg
+	}
+}
+
+func (m *Model) startVocabProbe(allowProbe bool) tea.Cmd {
+	if !allowProbe || m.completion.vocabLoading || m.client == nil {
+		return nil
+	}
+	m.completion.vocabSeq++
+	m.completion.vocabLoading = true
+	return probeVocab(m.client, m.completion.vocabSeq)
+}
+
+func probeVocab(client *intercept.Client, seq int) tea.Cmd {
+	return func() tea.Msg {
+		env, err := client.Query("cmds")
+		if err != nil {
+			return vocabResultMsg{seq: seq, err: err}
+		}
+		msg := vocabResultMsg{seq: seq, categories: parseNameList(env.Msg)}
+		for _, cat := range msg.categories {
+			env, err := client.Query("cmds " + cat)
+			if err != nil {
+				return vocabResultMsg{seq: seq, err: err}
+			}
+			names := parseNameList(env.Msg)
+			msg.commands = append(msg.commands, names...)
+			if cat == "filesystem" {
+				msg.filesystem = names
+			}
+		}
+		msg.commands = dedupeSorted(msg.commands)
+		return msg
+	}
+}
+
+func (m *Model) applyVocabResult(msg vocabResultMsg) {
+	if msg.seq != m.completion.vocabSeq {
+		return
+	}
+	m.completion.vocabLoading = false
+	if msg.err != nil {
+		m.logProbeError(msg.err)
+		return
+	}
+	m.completion.categories = toEntries(msg.categories)
+	m.completion.vocab = toEntries(msg.commands)
+	for _, name := range msg.filesystem {
+		if spec, ok := specFromFilesystem(name); ok {
+			m.completion.commands[name] = spec
+		}
+	}
+	m.completeInput(false)
+}
+
+func (m *Model) applyProbeResult(msg probeResultMsg) {
+	if msg.seq != m.completion.probeSeq {
+		return
+	}
+	if msg.err != nil {
+		m.logProbeError(msg.err)
+		return
+	}
+	for dir, entries := range parseListing(msg.listing) {
+		m.completion.completions[completionKey{dir: dir, local: msg.key.local}] = entries
+	}
+	if _, ok := m.completion.completions[msg.key]; !ok {
+		m.completion.completions[msg.key] = nil
+	}
+	m.completeInput(false)
+}
+
+func (m *Model) invalidateCompletions(value string) {
+	fields := strings.Fields(value)
+	switch {
+	case len(fields) >= 2 && fields[0] == "software":
+		switch fields[1] {
+		case "install", "uninstall", "transfer", "destroy":
+			delete(m.completion.indexedLists, "software list")
+			m.completion.indexedListSeq++
+		}
+	case len(fields) >= 2 && fields[0] == "jobs" && fields[1] == "kill":
+		delete(m.completion.indexedLists, "jobs list")
+		m.completion.indexedListSeq++
+	}
+
+	if len(fields) == 0 {
+		return
+	}
+	cmd := fields[0]
+	if spec, ok := m.completion.commands[cmd]; ok && spec.InvalidateFS {
+		m.completion.invalidatePathCaches()
+		return
+	}
+	if cmd == "connect" {
+		m.completion.invalidatePathCaches()
+	}
+}

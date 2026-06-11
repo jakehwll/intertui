@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -38,6 +39,13 @@ func TestRunInit(t *testing.T) {
 	_, err = RunInit(InitOptions{Server: "example.com"})
 	if err == nil {
 		t.Fatal("expected error when config exists")
+	}
+	var exist *ConfigExistsError
+	if !errors.As(err, &exist) {
+		t.Fatalf("expected ConfigExistsError, got %T: %v", err, err)
+	}
+	if exist.YAML == "" {
+		t.Fatal("expected YAML in ConfigExistsError")
 	}
 
 	_, err = RunInit(InitOptions{Server: "other.com", Force: true})

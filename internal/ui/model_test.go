@@ -59,14 +59,12 @@ func TestModelUpdateConnect(t *testing.T) {
 		wantCmd    bool
 	}{
 		{
-			name: "connect progress appends status",
+			name: "connect progress drains status quietly",
 			msg: connectProgressMsg{
-				line:     "Logging in…",
 				statusCh: closedStringCh(),
 				doneCh:   make(chan clientReadyMsg),
 			},
 			wantState: stateConnecting,
-			wantInLog: []string{"Logging in"},
 			wantCmd:   true,
 		},
 		{
@@ -74,7 +72,6 @@ func TestModelUpdateConnect(t *testing.T) {
 			msg:       clientReadyMsg{user: "alice"},
 			wantState: stateConnected,
 			wantUser:  "alice",
-			wantNoLog: []string{"Intercept terminal", "Target:"},
 			wantCmd:   true,
 		},
 		{
@@ -132,13 +129,11 @@ func TestModelUpdateGameLine(t *testing.T) {
 			name:      "append game output",
 			line:      "welcome to intercept",
 			wantInLog: []string{"welcome to intercept"},
-			wantCmd:   false,
 		},
 		{
 			name:      "append unknown event summary",
 			line:      "server → clink, ok",
 			wantInLog: []string{"server → clink, ok"},
-			wantCmd:   false,
 		},
 	}
 
@@ -227,6 +222,7 @@ func TestModelUpdateHistory(t *testing.T) {
 		actions   func(t *testing.T, m *Model)
 		wantInput string
 		wantHist  []string
+		wantInLog string
 	}{
 		{
 			name: "submit stores command history",
@@ -236,6 +232,15 @@ func TestModelUpdateHistory(t *testing.T) {
 			},
 			wantInput: "",
 			wantHist:  []string{"help", "scan"},
+		},
+		{
+			name: "submit echoes command with input prompt",
+			actions: func(t *testing.T, m *Model) {
+				submit(t, m, "ls")
+			},
+			wantInput: "",
+			wantHist:  []string{"ls"},
+			wantInLog: "> ",
 		},
 		{
 			name: "ctrl+p walks backward through history",
@@ -249,6 +254,18 @@ func TestModelUpdateHistory(t *testing.T) {
 			wantHist:  []string{"help", "scan"},
 		},
 		{
+			name: "up and down walk command history",
+			actions: func(t *testing.T, m *Model) {
+				submit(t, m, "help")
+				submit(t, m, "scan")
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+			},
+			wantInput: "scan",
+			wantHist:  []string{"help", "scan"},
+		},
+		{
 			name: "ctrl+n restores draft after history",
 			actions: func(t *testing.T, m *Model) {
 				submit(t, m, "help")
@@ -258,6 +275,74 @@ func TestModelUpdateHistory(t *testing.T) {
 			},
 			wantInput: "draft",
 			wantHist:  []string{"help"},
+		},
+		{
+			name: "up filters history by typed prefix",
+			actions: func(t *testing.T, m *Model) {
+				submit(t, m, "help")
+				submit(t, m, "cmds filesystem")
+				submit(t, m, "scan")
+				submit(t, m, "cmds client")
+				m.input.SetValue("cmds ")
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+			},
+			wantInput: "cmds filesystem",
+			wantHist:  []string{"help", "cmds filesystem", "scan", "cmds client"},
+		},
+		{
+			name: "down walks prefix-filtered history forward",
+			actions: func(t *testing.T, m *Model) {
+				submit(t, m, "help")
+				submit(t, m, "cmds filesystem")
+				submit(t, m, "scan")
+				submit(t, m, "cmds client")
+				m.input.SetValue("cmds ")
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+			},
+			wantInput: "cmds client",
+			wantHist:  []string{"help", "cmds filesystem", "scan", "cmds client"},
+		},
+		{
+			name: "up at oldest prefix match stays put",
+			actions: func(t *testing.T, m *Model) {
+				submit(t, m, "cmds filesystem")
+				submit(t, m, "cmds client")
+				m.input.SetValue("cmds ")
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+			},
+			wantInput: "cmds filesystem",
+			wantHist:  []string{"cmds filesystem", "cmds client"},
+		},
+		{
+			name: "down works after extra up at oldest prefix match",
+			actions: func(t *testing.T, m *Model) {
+				submit(t, m, "cmds filesystem")
+				submit(t, m, "cmds client")
+				m.input.SetValue("cmds ")
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+			},
+			wantInput: "cmds client",
+			wantHist:  []string{"cmds filesystem", "cmds client"},
+		},
+		{
+			name: "down restores prefix draft after newest match",
+			actions: func(t *testing.T, m *Model) {
+				submit(t, m, "cmds filesystem")
+				submit(t, m, "cmds client")
+				m.input.SetValue("cmds ")
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+				pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+			},
+			wantInput: "cmds ",
+			wantHist:  []string{"cmds filesystem", "cmds client"},
 		},
 		{
 			name: "duplicate submits are not stored twice",
@@ -287,6 +372,9 @@ func TestModelUpdateHistory(t *testing.T) {
 				if m.history[i] != want {
 					t.Fatalf("history[%d] = %q, want %q", i, m.history[i], want)
 				}
+			}
+			if tt.wantInLog != "" && !hasMessage(m.messages, tt.wantInLog) {
+				t.Fatalf("messages missing %q: %#v", tt.wantInLog, m.messages)
 			}
 		})
 	}
@@ -319,7 +407,7 @@ func TestModelUpdateReconnect(t *testing.T) {
 				pressKey(t, m, tea.KeyPressMsg{Code: 'r'})
 			},
 			wantState: stateConnecting,
-			wantInLog: []string{"game output", "Disconnected.", "Reconnecting"},
+			wantInLog: []string{"game output", "Disconnected."},
 		},
 		{
 			name:  "r is ignored while connected",
@@ -338,7 +426,7 @@ func TestModelUpdateReconnect(t *testing.T) {
 				*m = updated.(Model)
 			},
 			wantState: stateConnected,
-			wantInLog: []string{"game output", "Disconnected.", "Reconnecting", "Reconnected."},
+			wantInLog: []string{"game output", "Disconnected."},
 		},
 		{
 			name:  "reconnect failure returns to error state",
@@ -349,7 +437,7 @@ func TestModelUpdateReconnect(t *testing.T) {
 				*m = updated.(Model)
 			},
 			wantState: stateError,
-			wantInLog: []string{"game output", "Reconnecting", "Connection failed: dial refused"},
+			wantInLog: []string{"game output", "Connection failed: dial refused"},
 		},
 	}
 
@@ -369,6 +457,325 @@ func TestModelUpdateReconnect(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestMouseClickWordCopy(t *testing.T) {
+	t.Parallel()
+
+	m := connectedModel(t)
+	updated, _ := m.Update(intercept.GameLineMsg{Line: "scanning 1.2.3.4:13373 done"})
+	m = updated.(Model)
+
+	// Click on the IP without dragging.
+	updated, _ = m.Update(tea.MouseClickMsg{X: 9, Y: 0, Button: tea.MouseLeft})
+	m = updated.(Model)
+	updated, cmd := m.Update(tea.MouseReleaseMsg{X: 9, Y: 0, Button: tea.MouseLeft})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected copy cmd on word click")
+	}
+	if got := m.selectionText(); got != "1.2.3.4:13373" {
+		t.Fatalf("selectionText() = %q, want %q", got, "1.2.3.4:13373")
+	}
+	if !m.copied {
+		t.Fatal("expected copied flag after word click")
+	}
+}
+
+func TestWordBoundsAt(t *testing.T) {
+	t.Parallel()
+
+	line := "target 1.2.3.4 ready"
+	from, to := wordBoundsAt(line, strings.Index(line, "1"))
+	if got := line[from : to+1]; got != "1.2.3.4" {
+		t.Fatalf("wordBoundsAt() = %q, want %q", got, "1.2.3.4")
+	}
+
+	// Whitespace click snaps to the nearest word.
+	from, to = wordBoundsAt(line, strings.Index(line, " "))
+	if got := line[from : to+1]; got != "target" {
+		t.Fatalf("nearest word = %q, want %q", got, "target")
+	}
+}
+
+func TestMouseSelection(t *testing.T) {
+	t.Parallel()
+
+	m := connectedModel(t)
+	for _, line := range []string{"alpha beta", "gamma delta"} {
+		updated, _ := m.Update(intercept.GameLineMsg{Line: line})
+		m = updated.(Model)
+	}
+
+	updated, _ := m.Update(tea.MouseClickMsg{X: 0, Y: 0, Button: tea.MouseLeft})
+	m = updated.(Model)
+	if !m.selecting {
+		t.Fatal("expected selecting after left click in log")
+	}
+
+	updated, _ = m.Update(tea.MouseMotionMsg{X: 4, Y: 0, Button: tea.MouseLeft})
+	m = updated.(Model)
+	if !m.selActive {
+		t.Fatal("expected active selection after drag")
+	}
+	if got := m.selectionText(); got != "alpha" {
+		t.Fatalf("selectionText() = %q, want %q", got, "alpha")
+	}
+
+	updated, cmd := m.Update(tea.MouseReleaseMsg{X: 4, Y: 0, Button: tea.MouseLeft})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected copy cmd on release")
+	}
+	if m.selecting {
+		t.Fatal("expected selecting=false after release")
+	}
+	if !m.selActive {
+		t.Fatal("expected selection to stay visible after release")
+	}
+	if !m.copied {
+		t.Fatal("expected copied flag after release")
+	}
+
+	// Esc clears the selection instead of quitting.
+	updated, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = updated.(Model)
+	if m.selActive {
+		t.Fatal("expected esc to clear selection")
+	}
+	if cmd != nil {
+		t.Fatal("expected esc with selection to not quit")
+	}
+}
+
+func TestMouseSelectionBottomLine(t *testing.T) {
+	t.Parallel()
+
+	m := connectedModel(t)
+	// 24-row terminal, 3 chrome rows -> 21 log rows. Fill past one screen so
+	// the viewport scrolls and the last line sits on the bottom rows.
+	for i := 0; i < 30; i++ {
+		updated, _ := m.Update(intercept.GameLineMsg{Line: strings.Repeat("x", 5) + " line"})
+		m = updated.(Model)
+	}
+
+	lastRow := m.viewport.Height() - 1
+	updated, _ := m.Update(tea.MouseClickMsg{X: 0, Y: lastRow - 1, Button: tea.MouseLeft})
+	m = updated.(Model)
+	// Drag below the viewport into the chrome; must clamp to the last line.
+	updated, _ = m.Update(tea.MouseMotionMsg{X: 9, Y: lastRow + 2, Button: tea.MouseLeft})
+	m = updated.(Model)
+
+	want := "xxxxx line\nxxxxx line"
+	if got := m.selectionText(); got != want {
+		t.Fatalf("selectionText() = %q, want %q", got, want)
+	}
+}
+
+func TestNewLinesDoNotScrollDuringSelection(t *testing.T) {
+	t.Parallel()
+
+	m := connectedModel(t)
+	for i := 0; i < 30; i++ {
+		updated, _ := m.Update(intercept.GameLineMsg{Line: "old line"})
+		m = updated.(Model)
+	}
+	offBefore := m.viewport.YOffset()
+
+	updated, _ := m.Update(tea.MouseClickMsg{X: 0, Y: 0, Button: tea.MouseLeft})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.MouseMotionMsg{X: 3, Y: 1, Button: tea.MouseLeft})
+	m = updated.(Model)
+
+	// New output mid-drag must not yank the viewport to the bottom.
+	updated, _ = m.Update(intercept.GameLineMsg{Line: "new line"})
+	m = updated.(Model)
+	if got := m.viewport.YOffset(); got != offBefore {
+		t.Fatalf("YOffset = %d during drag, want %d (no auto-scroll)", got, offBefore)
+	}
+
+	// After release, auto-follow resumes on the next line.
+	updated, _ = m.Update(tea.MouseReleaseMsg{X: 3, Y: 1, Button: tea.MouseLeft})
+	m = updated.(Model)
+	updated, _ = m.Update(intercept.GameLineMsg{Line: "after release"})
+	m = updated.(Model)
+	if got := m.viewport.YOffset(); got == offBefore {
+		t.Fatal("expected auto-follow to resume after release")
+	}
+}
+
+func TestMouseSelectionMultilineMessage(t *testing.T) {
+	t.Parallel()
+
+	m := connectedModel(t)
+	// A single game message spanning several rows (like `ls` output) must
+	// occupy one displayLines entry per rendered row.
+	updated, _ := m.Update(intercept.GameLineMsg{Line: "logs/\n    xfer.log"})
+	m = updated.(Model)
+	updated, _ = m.Update(intercept.GameLineMsg{Line: "done"})
+	m = updated.(Model)
+
+	if got := len(m.displayLines); got != 3 {
+		t.Fatalf("len(displayLines) = %d, want 3", got)
+	}
+
+	// Select the last row; before the fix this row was unreachable because
+	// the multi-line message counted as a single entry.
+	updated, _ = m.Update(tea.MouseClickMsg{X: 0, Y: 2, Button: tea.MouseLeft})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.MouseMotionMsg{X: 3, Y: 2, Button: tea.MouseLeft})
+	m = updated.(Model)
+	if got := m.selectionText(); got != "done" {
+		t.Fatalf("selectionText() = %q, want %q", got, "done")
+	}
+
+	// And the middle row maps to the second half of the multi-line message.
+	updated, _ = m.Update(tea.MouseClickMsg{X: 0, Y: 1, Button: tea.MouseLeft})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.MouseMotionMsg{X: 11, Y: 1, Button: tea.MouseLeft})
+	m = updated.(Model)
+	if got := m.selectionText(); got != "    xfer.log" {
+		t.Fatalf("selectionText() = %q, want %q", got, "    xfer.log")
+	}
+}
+
+func TestMouseSelectionMultiline(t *testing.T) {
+	t.Parallel()
+
+	m := connectedModel(t)
+	for _, line := range []string{"alpha beta", "gamma delta"} {
+		updated, _ := m.Update(intercept.GameLineMsg{Line: line})
+		m = updated.(Model)
+	}
+
+	updated, _ := m.Update(tea.MouseClickMsg{X: 6, Y: 0, Button: tea.MouseLeft})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.MouseMotionMsg{X: 4, Y: 1, Button: tea.MouseLeft})
+	m = updated.(Model)
+
+	if got, want := m.selectionText(), "beta\ngamma"; got != want {
+		t.Fatalf("selectionText() = %q, want %q", got, want)
+	}
+}
+
+func TestCtrlCCancelsInput(t *testing.T) {
+	t.Parallel()
+
+	m := connectedModel(t)
+	m.input.SetValue("rm logs/foo")
+	updated, cmd := m.Update(ctrlKey('c'))
+	model := updated.(Model)
+
+	if !model.detachHint {
+		t.Fatal("expected detachHint armed after cancelling input")
+	}
+	if model.input.Value() != "" {
+		t.Fatalf("input = %q, want empty", model.input.Value())
+	}
+	if !hasMessage(model.messages, "> ") || !hasMessage(model.messages, "rm logs/foo ^C") {
+		t.Fatalf("cancel not logged: %#v", model.messages)
+	}
+	if cmd == nil {
+		t.Fatal("expected timeout cmd after first ctrl+c")
+	}
+}
+
+func TestDetachHint(t *testing.T) {
+	t.Parallel()
+
+	m := connectedModel(t)
+	updated, cmd := m.Update(ctrlKey('c'))
+	model := updated.(Model)
+	if !model.detachHint {
+		t.Fatal("expected detachHint after first ctrl+c")
+	}
+	if cmd == nil {
+		t.Fatal("expected timeout cmd on first ctrl+c")
+	}
+
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a'})
+	model = updated.(Model)
+	if model.detachHint {
+		t.Fatal("expected detachHint cleared after typing")
+	}
+}
+
+func TestDoubleCtrlCDoesNotQuit(t *testing.T) {
+	t.Parallel()
+
+	m := connectedModel(t)
+	updated, _ := m.Update(ctrlKey('c'))
+	m = updated.(Model)
+
+	updated, cmd := m.Update(ctrlKey('c'))
+	if isQuitCmd(cmd) {
+		t.Fatal("second ctrl+c should not quit")
+	}
+	model := updated.(Model)
+	if !model.detachHint {
+		t.Fatal("expected detachHint still armed after second ctrl+c")
+	}
+}
+
+func TestCtrlADetachQuits(t *testing.T) {
+	t.Parallel()
+
+	m := connectedModel(t)
+	updated, cmd := m.Update(ctrlKey('a'))
+	if cmd != nil {
+		t.Fatal("expected no cmd after ctrl+a")
+	}
+	model := updated.(Model)
+	if !model.prefixArmed {
+		t.Fatal("expected prefix armed after ctrl+a")
+	}
+
+	updated, cmd = model.Update(tea.KeyPressMsg{Code: 'd'})
+	if !isQuitCmd(cmd) {
+		t.Fatal("expected ctrl+a, d to quit")
+	}
+}
+
+func TestCtrlADCtrlDDetachQuits(t *testing.T) {
+	t.Parallel()
+
+	m := connectedModel(t)
+	updated, _ := m.Update(ctrlKey('a'))
+	m = updated.(Model)
+
+	updated, cmd := m.Update(ctrlKey('d'))
+	if !isQuitCmd(cmd) {
+		t.Fatal("expected ctrl+a, ctrl+d to quit")
+	}
+}
+
+func TestDetachHintTimeout(t *testing.T) {
+	t.Parallel()
+
+	m := connectedModel(t)
+	updated, _ := m.Update(ctrlKey('c'))
+	m = updated.(Model)
+
+	// A stale timer (older seq) must not clear a re-armed hint.
+	updated, _ = m.Update(detachHintTimeoutMsg{seq: m.detachHintSeq - 1})
+	m = updated.(Model)
+	if !m.detachHint {
+		t.Fatal("stale timeout should not clear detachHint")
+	}
+
+	// The matching timer resets the hint.
+	updated, _ = m.Update(detachHintTimeoutMsg{seq: m.detachHintSeq})
+	m = updated.(Model)
+	if m.detachHint {
+		t.Fatal("expected detachHint cleared after timeout")
+	}
+
+	// After the reset, ctrl+c arms again.
+	updated, _ = m.Update(ctrlKey('c'))
+	m = updated.(Model)
+	if !m.detachHint {
+		t.Fatal("expected detachHint re-armed after timeout reset")
 	}
 }
 
@@ -406,6 +813,14 @@ func pressKey(t *testing.T, m *Model, key tea.KeyPressMsg) {
 
 func ctrlKey(ch rune) tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: ch, Mod: tea.ModCtrl}
+}
+
+func isQuitCmd(cmd tea.Cmd) bool {
+	if cmd == nil {
+		return false
+	}
+	_, ok := cmd().(tea.QuitMsg)
+	return ok
 }
 
 func closedStringCh() <-chan string {
