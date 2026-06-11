@@ -8,11 +8,11 @@ This project is unofficial and not affiliated with the game or its authors.
 
 ## Features
 
-- Fullscreen UI in the style of Claude Code: log fills the screen with input and status pinned at the bottom; mouse wheel scrolls, and click-drag selects text in-app, copying it to your clipboard on release
+- Fullscreen terminal UI with a scrollable log, input line, and status bar
+- Mouse: wheel scroll, click to copy a word, drag to select text (copied on release)
 - ANSI colors for in-game `¬` color codes
-- TCP transport (default) with optional WebSocket mode
-- Username/password login (TCP) or extended WebSocket login flows
-- Offline mode with a built-in mock server for development
+- Tab completion for commands, subcommands, and filesystem paths
+- Session logging to `~/.intertui/logs/`
 
 ## Requirements
 
@@ -42,17 +42,8 @@ intertui init --server HOST --user YOU --pass SECRET
 # Connect using config file
 intertui
 
-# Or pass flags (override config)
-intertui --server HOST --user YOU --pass SECRET
-
-# Offline mock server (no network)
-./intertui --offline
-
-# WebSocket (alternate API; not what the live server uses by default)
-./intertui --ws --user YOU --pass SECRET
-
-# Custom host
-./intertui --server example.com --port 13373 --user YOU --pass SECRET
+# Override credentials for this session
+intertui --user YOU --pass SECRET
 ```
 
 ### Flags
@@ -61,13 +52,6 @@ intertui --server HOST --user YOU --pass SECRET
 |------|-------------|
 | `--user` | Intercept username |
 | `--pass` | Intercept password |
-| `--token` | API token (WebSocket mode only) |
-| `--server` | Game server host |
-| `--port` | Server port (default: `13373`) |
-| `--ws` | Use WebSocket instead of TCP |
-| `--tls` | Use `wss://` instead of `ws://` (with `--ws`) |
-| `--url` | Full WebSocket URL (overrides `--server` / `--port`) |
-| `--offline` | Built-in mock WebSocket server |
 
 ### Environment variables
 
@@ -75,12 +59,6 @@ intertui --server HOST --user YOU --pass SECRET
 |----------|------|
 | `INTERCEPT_USER` | `--user` |
 | `INTERCEPT_PASS` | `--pass` |
-| `INTERCEPT_TOKEN` | `--token` |
-| `INTERCEPT_SERVER` | `--server` |
-| `INTERCEPT_PORT` | `--port` |
-| `INTERCEPT_WS` | `--ws` (`1` or `true`) |
-| `INTERCEPT_TLS` | `--tls` (`1` or `true`) |
-| `INTERCEPT_URL` | `--url` |
 
 ### Keyboard shortcuts
 
@@ -103,43 +81,21 @@ intertui --server HOST --user YOU --pass SECRET
 
 ### Tab completion
 
-Press `Tab` to complete command names, subcommands, and filesystem paths. The first completion may query the server silently in the background; press `Tab` again if nothing happens immediately. Ambiguous matches are listed in the log.
+Press `Tab` to complete command names, subcommands, and filesystem paths. The first completion may query the server in the background; press `Tab` again if nothing appears right away. Ambiguous matches are listed in the log.
 
-The command list learned from `cmds` is cached for the rest of the session. Directory listings used for path completion are cleared when you run commands that change the filesystem (`mkdir`, `rm`, and similar) or when you reconnect.
+Command names from `cmds` are cached for the session. Directory listings are cleared when you run commands that change the filesystem (`mkdir`, `rm`, and similar) or when you reconnect.
 
-**Reconnecting:** Press `r` after a disconnect to reconnect. File-completion caches are reset, but the cached command vocabulary is kept on purpose — it reflects your account’s command set, not remote host state. If you reconnect to a **different** server or account (for example by changing flags and pressing `r`), tab completion may show stale commands until you restart `intertui`.
+If you reconnect to a different server or account, restart `intertui` to refresh the command cache.
 
 ## Configuration
 
-Default settings live in `~/.intertui/config.yaml` (create with `intertui init`). Flags and environment variables override the file. Default port is in [`internal/constants/constants.go`](internal/constants/constants.go) (`DEFAULT_PORT`). WebSocket URLs are derived as `ws://host:port/ws` unless you pass `--url`.
+Default settings live in `~/.intertui/config.yaml` (create with `intertui init`). `--user` and `--pass` override the file for a single session.
 
 Session logs are written to `~/.intertui/logs/latest.log`. On each launch, the previous `latest.log` is renamed to a timestamped file in the same directory (for example `2025-06-10T12-34-56.log`).
 
 ## Development
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Protocol
-
-JSON request/response protocol, informed by [intercept.py](https://github.com/Martmists-GH/intercept.py):
-
-- **TCP (default):** one JSON object per line on port `13373` — `auth` (login) → `connect` (token)
-- **WebSocket:** JSON frames — `auth` → `systems` → `connect` (system)
-
-Inbound events include `chat`, `broadcast`, `command`, `connect`, and others. Commands are sent as `{"request":"command","cmd":"..."}`.
-
-## Project layout
-
-```
-intertui/
-  main.go
-  internal/
-    constants/     # DEFAULT_PORT
-    config/        # flags and env
-    intercept/     # protocol client
-    ui/            # Bubble Tea TUI
-  cmd/probe/       # optional protocol debugger
-```
 
 ## License
 

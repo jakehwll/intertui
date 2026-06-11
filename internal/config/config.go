@@ -14,10 +14,9 @@ import (
 
 // Config holds runtime options for intertui.
 type Config struct {
-	User    string
-	Pass    string
-	Token   string
-	Offline bool
+	User  string
+	Pass  string
+	Token string
 
 	Server string
 	Port   int
@@ -57,59 +56,41 @@ func RootCmd(run func(Config) error) *serpent.Command {
 			Description: "Intercept password.",
 		},
 		{
-			Name:        "token",
-			Flag:        "token",
-			Env:         "INTERCEPT_TOKEN",
-			YAML:        "token",
-			Value:       serpent.StringOf(&cfg.Token),
-			Description: "Intercept API token (WebSocket mode only).",
+			Name:   "server",
+			YAML:   "server",
+			Hidden: true,
+			Value:  serpent.StringOf(&cfg.Server),
 		},
 		{
-			Name:        "server",
-			Flag:        "server",
-			Env:         "INTERCEPT_SERVER",
-			YAML:        "server",
-			Value:       serpent.StringOf(&cfg.Server),
-			Description: "Game server host or IP.",
+			Name:    "port",
+			YAML:    "port",
+			Hidden:  true,
+			Default: "0",
+			Value:   serpent.Int64Of(&port),
 		},
 		{
-			Name:        "port",
-			Flag:        "port",
-			Env:         "INTERCEPT_PORT",
-			YAML:        "port",
-			Default:     "0",
-			Value:       serpent.Int64Of(&port),
-			Description: fmt.Sprintf("Server port (default %d).", constants.DEFAULT_PORT),
+			Name:   "token",
+			YAML:   "token",
+			Hidden: true,
+			Value:  serpent.StringOf(&cfg.Token),
 		},
 		{
-			Name:        "ws",
-			Flag:        "ws",
-			Env:         "INTERCEPT_WS",
-			YAML:        "ws",
-			Value:       serpent.BoolOf(&cfg.WS),
-			Description: fmt.Sprintf("Use WebSocket transport (default: raw TCP on port %d).", constants.DEFAULT_PORT),
+			Name:   "ws",
+			YAML:   "ws",
+			Hidden: true,
+			Value:  serpent.BoolOf(&cfg.WS),
 		},
 		{
-			Name:        "tls",
-			Flag:        "tls",
-			Env:         "INTERCEPT_TLS",
-			YAML:        "tls",
-			Value:       serpent.BoolOf(&cfg.TLS),
-			Description: "Use wss:// instead of ws:// (with --ws).",
+			Name:   "tls",
+			YAML:   "tls",
+			Hidden: true,
+			Value:  serpent.BoolOf(&cfg.TLS),
 		},
 		{
-			Name:        "url",
-			Flag:        "url",
-			Env:         "INTERCEPT_URL",
-			YAML:        "url",
-			Value:       serpent.StringOf(&cfg.URL),
-			Description: "Full endpoint URL (overrides --server; ws:// or wss:// enables WebSocket).",
-		},
-		{
-			Name:        "offline",
-			Flag:        "offline",
-			Value:       serpent.BoolOf(&cfg.Offline),
-			Description: "Use built-in mock server.",
+			Name:   "url",
+			YAML:   "url",
+			Hidden: true,
+			Value:  serpent.StringOf(&cfg.URL),
 		},
 	}
 
@@ -172,9 +153,6 @@ func (c Config) ResolveURL() string {
 
 // DialDescription returns a human-readable target for status output.
 func (c Config) DialDescription() string {
-	if c.Offline {
-		return "offline mock server"
-	}
 	if c.WS || strings.HasPrefix(c.URL, "ws") {
 		return c.ResolveURL()
 	}

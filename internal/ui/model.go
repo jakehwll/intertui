@@ -82,17 +82,12 @@ func New(cfg config.Config) Model {
 	styles.Cursor.Blink = false
 	ti.SetStyles(styles)
 
-	m := Model{
+	return Model{
 		cfg:        cfg,
 		input:      ti,
 		state:      stateConnecting,
 		completion: newCompletionState(),
 	}
-	if cfg.Offline && !cfg.HasCreds() {
-		m.cfg.User = "offline"
-		m.cfg.Pass = "offline"
-	}
-	return m
 }
 
 func (m Model) Init() tea.Cmd {
