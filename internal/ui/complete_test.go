@@ -585,8 +585,11 @@ func TestJobsCompletion(t *testing.T) {
 
 	setInput(t, &m, "jobs kill ")
 	pressKey(t, &m, tea.KeyPressMsg{Code: tea.KeyTab})
-	if got := m.input.Value(); got != "jobs kill 0" {
-		t.Fatalf("index input = %q, want %q", got, "jobs kill 0")
+	if got := m.input.Value(); got != "jobs kill " {
+		t.Fatalf("index input = %q, want unchanged", got)
+	}
+	if !hasMessage(m.messages, "0") || !hasMessage(m.messages, "1") {
+		t.Fatalf("job indices not listed: %#v", m.messages)
 	}
 }
 
@@ -638,7 +641,21 @@ func TestSoftwareCompletion(t *testing.T) {
 		}
 	})
 
-	t.Run("index", func(t *testing.T) {
+	t.Run("index lists candidates when ambiguous", func(t *testing.T) {
+		setInput(t, &m, "software uninstall ")
+		pressKey(t, &m, tea.KeyPressMsg{Code: tea.KeyTab})
+		if got := m.input.Value(); got != "software uninstall " {
+			t.Fatalf("input = %q, want unchanged", got)
+		}
+		for _, idx := range []string{"0", "1", "2"} {
+			if !hasMessage(m.messages, idx) {
+				t.Fatalf("index %q not listed: %#v", idx, m.messages)
+			}
+		}
+	})
+
+	t.Run("index fills when unique", func(t *testing.T) {
+		m.completion.indexedLists["software list"] = toEntries([]string{"0"})
 		setInput(t, &m, "software uninstall ")
 		pressKey(t, &m, tea.KeyPressMsg{Code: tea.KeyTab})
 		if got := m.input.Value(); got != "software uninstall 0" {

@@ -421,17 +421,6 @@ func (m *Model) completeIndexedList(t inputTarget, arg ArgSpec, allowProbe bool)
 		m.completion.indexedListSeq++
 		return probeIndexedList(m.client, arg.Probe, arg.Section, m.completion.indexedListSeq)
 	}
-	// Empty partial: fill the lowest index (e.g. "software uninstall " → "… 0").
-	if t.partial == "" && len(entries) > 0 {
-		names := make([]string, len(entries))
-		for i, e := range entries {
-			names[i] = e.name
-		}
-		sort.Strings(names)
-		m.input.SetValue(t.prefix + names[0] + t.suffix)
-		m.input.CursorEnd()
-		return nil
-	}
 	m.completeAgainst(t.prefix, t.partial, t.wordSuffix, t.suffix, entries, "", PathDefault)
 	return nil
 }
