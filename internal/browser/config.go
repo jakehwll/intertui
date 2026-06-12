@@ -17,7 +17,6 @@ const defaultSIOPort = 13370
 type Config struct {
 	config.Config
 
-	Offline  bool
 	Proxy    bool
 	SocketIO bool
 }
@@ -56,9 +55,6 @@ func (c Config) remoteSocketIOURL() string {
 
 // DialDescription returns a human-readable connection target for logs.
 func (c Config) DialDescription() string {
-	if c.Offline {
-		return "offline mock server"
-	}
 	if c.Proxy {
 		return "socket.io via proxy → " + c.remoteSocketIOURL()
 	}

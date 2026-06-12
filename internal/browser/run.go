@@ -17,18 +17,16 @@ func Run(cfg Config) error {
 		defer filelog.Close()
 	}
 
-	if !cfg.Offline {
-		if !cfg.HasCreds() {
-			return fmt.Errorf("credentials required")
-		}
-		if cfg.Server == "" && cfg.URL == "" {
-			return fmt.Errorf("server required")
-		}
+	if !cfg.HasCreds() {
+		return fmt.Errorf("credentials required")
+	}
+	if cfg.Server == "" && cfg.URL == "" {
+		return fmt.Errorf("server required")
 	}
 
 	logPath, _ := filelog.Path()
-	filelog.Info("start target=%s offline=%v ws=%v sio=%v user=%s log=%s",
-		cfg.DialDescription(), cfg.Offline, cfg.WS, cfg.SocketIO, cfg.User, logPath)
+	filelog.Info("start target=%s ws=%v sio=%v user=%s log=%s",
+		cfg.DialDescription(), cfg.WS, cfg.SocketIO, cfg.User, logPath)
 
 	initTerminal()
 	p := newProgram(ui.New(cfg.Config, ui.WithClient(ClientFactory(cfg))))

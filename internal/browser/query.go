@@ -17,21 +17,11 @@ func ParseQuery() (Config, error) {
 	search := js.Global().Get("window").Get("location").Get("search").String()
 	params := parseSearch(search)
 
-	cfg := Config{
-		Offline: true,
-		Config: config.Config{
-			User: "offline",
-			Pass: "offline",
-		},
-	}
+	cfg := Config{Config: config.Config{}}
 
-	if v := params["offline"]; v == "0" || v == "false" {
-		cfg.Offline = false
-	}
 	if v := params["ws"]; v == "1" || v == "true" {
 		cfg.WS = true
 		cfg.SocketIO = false
-		cfg.Offline = false
 	}
 	if v := params["tls"]; v == "1" || v == "true" {
 		cfg.TLS = true
@@ -59,27 +49,22 @@ func ParseQuery() (Config, error) {
 		cfg.URL = v
 	}
 
-	if cfg.Server != "" || cfg.URL != "" {
-		cfg.Offline = false
-	}
-	if !cfg.Offline && !cfg.WS {
+	if !cfg.WS {
 		cfg.SocketIO = true
 	}
 
 	cfg.finalize()
 
-	if !cfg.Offline && cfg.SocketIO && params["url"] == "" && proxyEnabled(params) {
+	if cfg.SocketIO && params["url"] == "" && proxyEnabled(params) {
 		cfg.Proxy = true
 		cfg.URL = js.Global().Get("window").Get("location").Get("origin").String()
 	}
 
-	if !cfg.Offline {
-		if !cfg.HasCreds() {
-			return Config{}, fmt.Errorf("credentials required: add ?user=...&pass=... or ?token=...")
-		}
-		if cfg.Server == "" && cfg.URL == "" {
-			return Config{}, fmt.Errorf("server required: add ?server=HOST")
-		}
+	if !cfg.HasCreds() {
+		return Config{}, fmt.Errorf("credentials required: add ?user=...&pass=... or ?token=...")
+	}
+	if cfg.Server == "" && cfg.URL == "" {
+		return Config{}, fmt.Errorf("server required: add ?server=HOST")
 	}
 
 	return cfg, nil

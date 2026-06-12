@@ -10,9 +10,6 @@ import (
 // NewClient builds an intercept client for the browser runtime.
 func NewClient(cfg Config) *intercept.Client {
 	cred := cfg.Credentials()
-	if cfg.Offline {
-		return intercept.NewMock(cred)
-	}
 	if cfg.WS {
 		return intercept.NewWebSocket(cfg.ResolveURL(), cred)
 	}

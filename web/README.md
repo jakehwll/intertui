@@ -16,9 +16,8 @@ go run ./web/serve.go
 
 | Param | Description |
 |-------|-------------|
-| *(none)* | Offline mock (default) |
-| `server` | Game host (required for live play) |
-| `user`, `pass` | Credentials (or `token`) |
+| `server` | Game host (required) |
+| `user`, `pass` | Credentials (required; or `token`) |
 | `port` | Socket.IO port (default `13370`) |
 | `tls=1` | Use `https://` to reach the game server |
 | `direct=1` | Skip proxy; browser hits game host directly (needs CORS) |
