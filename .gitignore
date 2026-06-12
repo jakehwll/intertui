@@ -16,6 +16,4 @@ coverage.out
 .DS_Store
 
 # editor
-.idea/
-.vscode/
 *.swp
