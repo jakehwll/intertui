@@ -1,3 +1,10 @@
+```
+▗▄▄▄▖▗▖  ▗▖▗▄▄▄▖▗▄▄▄▖▗▄▄▖▗▄▄▄▖▗▖ ▗▖▗▄▄▄▖
+  █  ▐▛▚▖▐▌  █  ▐▌   ▐▌ ▐▌ █  ▐▌ ▐▌  █  
+  █  ▐▌ ▝▜▌  █  ▐▛▀▀▘▐▛▀▚▖ █  ▐▌ ▐▌  █  
+▗▄█▄▖▐▌  ▐▌  █  ▐▙▄▄▖▐▌ ▐▌ █  ▝▚▄▞▘▗▄█▄▖
+```
+
 # intertui
 
 A terminal client for [Intercept](https://bubmet.itch.io/intercept), the hacking MUD by [bubmet](https://github.com/bubmet). Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea).

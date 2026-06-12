@@ -9,8 +9,12 @@ import (
 )
 
 var (
-	dim      = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	selStyle = lipgloss.NewStyle().Reverse(true)
+	dim         = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	hintStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("242"))
+	selStyle    = lipgloss.NewStyle().Reverse(true)
+	footerStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("0")).
+			Background(lipgloss.Color("7"))
 )
 
 // View implements tea.Model.
@@ -24,7 +28,7 @@ func (m Model) View() tea.View {
 	}
 
 	w := max(1, m.width)
-	v.SetContent(lipgloss.JoinVertical(lipgloss.Left, m.logView(), m.chrome(w)))
+	v.SetContent(lipgloss.JoinVertical(lipgloss.Left, m.footer(w), "", m.logView(), m.chrome(w)))
 	return v
 }
 
@@ -77,38 +81,47 @@ func (m Model) chrome(w int) string {
 	return lipgloss.JoinVertical(lipgloss.Left,
 		row.Render(""),
 		row.Render(input),
-		row.Render(m.footer(w)),
+		m.chromeHint(),
 	)
 }
 
-func (m Model) footer(w int) string {
-	if m.prefixArmed {
-		return lipgloss.NewStyle().Width(w).Render(dim.Render("Press D to detach"))
-	}
-	if m.detachHint {
-		return lipgloss.NewStyle().Width(w).Render(dim.Render("Press Ctrl+A, D to detach"))
-	}
-
-	status := m.statusStyle().Render("● " + m.connectionStatus())
-
-	var left string
-	switch {
-	case m.copied:
-		left = dim.Render("copied selection")
+func (m Model) chromeHint() string {
+	var hint string
+	switch m.state {
+	case stateConnected:
+		hint = "enter send · tab complete · ↑/↓ history · drag copy · ctrl+a,d detach · esc quit"
+	case stateError:
+		hint = "r reconnect · esc quit"
 	default:
-		if user := m.displayUser(); user != "" {
-			left = dim.Render(user)
-		}
+		hint = "esc quit"
 	}
+	return hintStyle.Render(hint)
+}
 
-	if left == "" {
-		return lipgloss.NewStyle().Width(w).Align(lipgloss.Right).Render(status)
+func (m Model) footer(w int) string {
+	var content string
+	switch {
+	case m.prefixArmed:
+		content = "Press D to detach"
+	case m.detachHint:
+		content = "Press Ctrl+A, D to detach"
+	default:
+		status := "● " + m.connectionStatus()
+		var left string
+		switch {
+		case m.copied:
+			left = "copied selection"
+		default:
+			left = m.displayUser()
+		}
+		if left == "" {
+			return footerStyle.Width(w).Align(lipgloss.Right).Render(status)
+		}
+		content = left + strings.Repeat(" ", max(1,
+			w-ansi.StringWidth(left)-ansi.StringWidth(status),
+		)) + status
 	}
-	return lipgloss.NewStyle().Width(w).Render(
-		left + strings.Repeat(" ", max(1,
-			w-lipgloss.Width(left)-lipgloss.Width(status),
-		)) + status,
-	)
+	return footerStyle.Width(w).Render(content)
 }
 
 func (m Model) connectionStatus() string {
@@ -129,19 +142,9 @@ func (m Model) displayUser() string {
 	return m.cfg.User
 }
 
-func (m Model) statusStyle() lipgloss.Style {
-	switch m.state {
-	case stateConnecting:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
-	case stateConnected:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
-	default:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
-	}
-}
-
 func (m Model) chromeHeight() int {
-	return lipgloss.Height(m.chrome(max(1, m.width)))
+	w := max(1, m.width)
+	return lipgloss.Height(m.footer(w)) + 1 + lipgloss.Height(m.chrome(w))
 }
 
 func (m *Model) layout() {

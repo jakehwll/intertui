@@ -11,6 +11,7 @@ import (
 	"intertui/internal/config"
 	filelog "intertui/internal/log"
 	"intertui/internal/ui"
+	"intertui/internal/ui/auth"
 )
 
 func main() {
@@ -30,11 +31,15 @@ func run(cfg config.Config) error {
 		defer filelog.Close()
 	}
 
-	if !cfg.HasCreds() {
-		return fmt.Errorf("credentials required: run `intertui init`, or use --user and --pass")
-	}
-	if cfg.Server == "" && cfg.URL == "" {
-		return fmt.Errorf("server required: run `intertui init --server HOST`")
+	if auth.Needs(cfg) {
+		authCfg, ok, err := auth.Run(cfg)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil
+		}
+		cfg = authCfg
 	}
 
 	logPath, _ := filelog.Path()
