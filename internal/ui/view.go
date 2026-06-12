@@ -32,7 +32,6 @@ func (m Model) View() tea.View {
 	return v
 }
 
-// logView renders the log area, overlaying the in-app mouse selection.
 func (m Model) logView() string {
 	view := m.viewport.View()
 	if !m.selActive && !m.selecting {
@@ -89,7 +88,7 @@ func (m Model) chromeHint() string {
 	var hint string
 	switch m.state {
 	case stateConnected:
-		hint = "enter send · tab complete · ↑/↓ history · drag copy · ctrl+a,d detach · esc quit"
+		hint = "enter send · tab complete · ↑/↓ history · drag select · ctrl+a,d detach · esc quit"
 	case stateError:
 		hint = "r reconnect · esc quit"
 	default:
@@ -107,13 +106,7 @@ func (m Model) footer(w int) string {
 		content = "Press Ctrl+A, D to detach"
 	default:
 		status := "● " + m.connectionStatus()
-		var left string
-		switch {
-		case m.copied:
-			left = "copied selection"
-		default:
-			left = m.displayUser()
-		}
+		left := m.displayUser()
 		if left == "" {
 			return footerStyle.Width(w).Align(lipgloss.Right).Render(status)
 		}

@@ -3,8 +3,6 @@ package ui
 import (
 	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
@@ -47,8 +45,7 @@ type Model struct {
 	history  []string
 
 	// displayLines is messages hard-wrapped to the terminal width so each
-	// entry is exactly one screen row. This makes mouse-selection mapping
-	// (screen cell -> text) exact.
+	// entry is exactly one screen row (one cell row for drag selection).
 	displayLines []string
 
 	viewport viewport.Model
@@ -70,13 +67,14 @@ type Model struct {
 
 	completion completionState
 
-	// In-app mouse selection (Claude Code-style): we capture the mouse, draw
-	// the highlight ourselves, and copy to the clipboard on release.
-	selecting            bool // left button held, dragging
-	selActive            bool // selection exists (visible highlight)
-	selStartX, selStartY int  // anchor: X = cell column, Y = displayLines index
+	// In-app drag selection in the log area. Terminals with mouse reporting
+	// (including VS Code on macOS) do not support shift+drag native select;
+	// option+drag needs a VS Code setting. Plain drag highlight + copy works
+	// everywhere mouse events reach the app.
+	selecting            bool
+	selActive            bool
+	selStartX, selStartY int
 	selEndX, selEndY     int
-	copied               bool
 }
 
 // New returns the initial UI model.
@@ -194,7 +192,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, wheelCmd
 
 	case tea.MouseClickMsg:
-		m.copied = false
 		if msg.Button == tea.MouseLeft && msg.Y < m.viewport.Height() && len(m.displayLines) > 0 {
 			x, y := m.clampToLog(msg.X, msg.Y)
 			m.selecting = true
@@ -216,21 +213,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseReleaseMsg:
 		if m.selecting {
 			m.selecting = false
-			if !m.selActive {
-				m.expandSelectionToWord()
-			}
+			var copyCmd tea.Cmd
 			if m.selActive {
 				if text := m.selectionText(); text != "" {
-					m.copied = true
-					return m, copyText(text)
+					copyCmd = copyText(text)
 				}
 			}
 			m.clearSelection()
+			return m, copyCmd
 		}
 		return m, nil
 
 	case tea.KeyPressMsg:
-		m.copied = false
 		if m.prefixArmed {
 			m.prefixArmed = false
 			if key.Matches(msg, detachKey) {
@@ -316,8 +310,6 @@ func (m *Model) log(line string) {
 	m.messages = append(m.messages, line)
 	m.displayLines = append(m.displayLines, wrapLine(line, m.width)...)
 	m.syncLog()
-	// Don't auto-follow while the user is dragging a selection, or the text
-	// would slide out from under the cursor.
 	if !m.selecting {
 		m.viewport.GotoBottom()
 	}
@@ -337,7 +329,7 @@ func (m *Model) syncLog() {
 
 // wrapLine splits a message into screen rows: embedded newlines first, then
 // hard-wrapping to the terminal width. Each returned entry is exactly one
-// rendered row, keeping mouse-selection indices aligned with the viewport.
+// rendered row.
 func wrapLine(line string, w int) []string {
 	var out []string
 	for _, part := range strings.Split(strings.ReplaceAll(line, "\r\n", "\n"), "\n") {
@@ -350,7 +342,6 @@ func wrapLine(line string, w int) []string {
 	return out
 }
 
-// clampToLog converts screen coordinates to (cell column, displayLines index).
 func (m Model) clampToLog(x, y int) (int, int) {
 	if x < 0 {
 		x = 0
@@ -364,7 +355,6 @@ func (m Model) clampToLog(x, y int) (int, int) {
 	return x, line
 }
 
-// selBounds returns the selection normalized to top-left -> bottom-right order.
 func (m Model) selBounds() (x0, y0, x1, y1 int) {
 	x0, y0, x1, y1 = m.selStartX, m.selStartY, m.selEndX, m.selEndY
 	if y1 < y0 || (y0 == y1 && x1 < x0) {
@@ -373,7 +363,6 @@ func (m Model) selBounds() (x0, y0, x1, y1 int) {
 	return
 }
 
-// selectionText extracts the selected text (end cell inclusive), ANSI stripped.
 func (m Model) selectionText() string {
 	x0, y0, x1, y1 := m.selBounds()
 	var out []string
@@ -393,95 +382,6 @@ func (m Model) selectionText() string {
 		out = append(out, strings.TrimRight(seg, " "))
 	}
 	return strings.Join(out, "\n")
-}
-
-func isWordChar(r rune) bool {
-	if unicode.IsLetter(r) || unicode.IsDigit(r) {
-		return true
-	}
-	switch r {
-	case '.', ':', '/', '-', '_', '@', '#':
-		return true
-	default:
-		return false
-	}
-}
-
-func wordCharAt(line string, col int) bool {
-	if col < 0 || col >= ansi.StringWidth(line) {
-		return false
-	}
-	ch := ansi.Strip(ansi.Cut(line, col, col+1))
-	if ch == "" {
-		return false
-	}
-	r, _ := utf8.DecodeRuneInString(ch)
-	return isWordChar(r)
-}
-
-// wordSpans returns [from, to) display-column spans for each word on a line.
-func wordSpans(line string) [][2]int {
-	width := ansi.StringWidth(line)
-	var spans [][2]int
-	for col := 0; col < width; {
-		if !wordCharAt(line, col) {
-			col++
-			continue
-		}
-		from := col
-		for col < width && wordCharAt(line, col) {
-			col++
-		}
-		spans = append(spans, [2]int{from, col})
-	}
-	return spans
-}
-
-func wordBoundsAt(line string, col int) (from, to int) {
-	spans := wordSpans(line)
-	if len(spans) == 0 {
-		return col, col
-	}
-	width := ansi.StringWidth(line)
-	col = max(0, min(col, width-1))
-
-	for _, sp := range spans {
-		if col >= sp[0] && col < sp[1] {
-			return sp[0], sp[1] - 1
-		}
-	}
-
-	best := spans[0]
-	bestDist := wordSpanDistance(col, best)
-	for _, sp := range spans[1:] {
-		if d := wordSpanDistance(col, sp); d < bestDist {
-			best, bestDist = sp, d
-		}
-	}
-	return best[0], best[1] - 1
-}
-
-func wordSpanDistance(col int, span [2]int) int {
-	if col < span[0] {
-		return span[0] - col
-	}
-	if col >= span[1] {
-		return col - span[1] + 1
-	}
-	return 0
-}
-
-func (m *Model) expandSelectionToWord() {
-	if m.selStartY < 0 || m.selStartY >= len(m.displayLines) {
-		return
-	}
-	from, to := wordBoundsAt(m.displayLines[m.selStartY], m.selStartX)
-	if from > to {
-		return
-	}
-	m.selStartX, m.selEndX = from, to
-	m.selEndY = m.selStartY
-	m.selActive = true
 }
 
 func (m *Model) clearSelection() {
